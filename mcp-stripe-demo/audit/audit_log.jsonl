@@ -1,0 +1,9 @@
+{"tool": "compliance_config_get", "args": {}, "ok": true, "ts": "2025-08-30T05:17:39.788792Z"}
+{"tool": "compliance_config_set", "args": {"stripe_high_amount_cents": 30000, "stripe_currency_allowlist": null, "stripe_velocity_24h_limit": null, "plaid_high_amount_usd": null, "plaid_velocity_24h_limit": null, "risk_threshold_alert": 60}, "ok": true, "ts": "2025-08-30T05:18:03.220306Z"}
+{"tool": "scan_stripe_payments", "args": {"days": 14, "limit": 150}, "ok": false, "error": "Invalid API Key provided: sk_test_...", "ts": "2025-08-30T05:18:31.419540Z"}
+{"tool": "scan_stripe_payments", "args": {"days": 14, "limit": 150}, "ok": true, "ts": "2025-08-30T05:24:01.586477Z"}
+{"tool": "scan_plaid_transactions", "args": {"key_or_access_token": "****", "days": 7, "count": 250, "offset": 0}, "ok": false, "error": "Invalid type for variable 'start_date'. Required value type is date and passed type was str at ['start_date']", "ts": "2025-08-30T05:24:35.205303Z"}
+{"tool": "scan_plaid_transactions", "args": {"key_or_access_token": "****", "days": 7, "count": 250, "offset": 0}, "ok": false, "error": "Invalid type for variable 'start_date'. Required value type is date and passed type was str at ['start_date']", "ts": "2025-08-30T05:24:41.361773Z"}
+{"tool": "plaid_transactions_scan", "args": {"key": "****", "days": 7, "count": 50, "offset": 0}, "ok": false, "error": "name '_token_for' is not defined", "ts": "2025-08-30T05:30:07.959526Z"}
+{"tool": "plaid_transactions_scan", "args": {"key": "****", "days": 30, "count": 50, "offset": 0}, "ok": false, "error": "name '_token_for' is not defined", "ts": "2025-08-30T05:30:12.423137Z"}
+{"tool": "plaid_transactions_scan", "args": {"key": "****", "days": 7, "count": 50, "offset": 0}, "ok": false, "error": "name '_token_for' is not defined", "ts": "2025-08-30T05:32:10.413651Z"}
