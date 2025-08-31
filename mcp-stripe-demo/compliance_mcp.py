@@ -1,139 +1,110 @@
 # compliance_mcp.py
-import os, json, csv, time, hashlib, pathlib
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-from functools import wraps
+# A lightweight compliance MCP: scan Plaid transactions, manage rules/blacklist,
+# write audit logs & JSON reports. Stripe usage is optional (loaded lazily).
+
+from __future__ import annotations
+
+import json
+import os
+import hashlib
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from datetime import date, timedelta, datetime
 
 
 from mcp.server.fastmcp import FastMCP
 
-# 3rd party sdks you already use
-import stripe
+# -------- Optional Stripe (won't crash if unavailable) --------
+try:
+    import stripe  # type: ignore
+except Exception:
+    stripe = None  # we guard any usage
+
+# -------- Plaid SDK (required for Plaid tools) --------
 import plaid
 from plaid.api import plaid_api
+
 from plaid.model.transactions_get_request import TransactionsGetRequest
 from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
-from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
+from plaid.model.auth_get_request import AuthGetRequest
+from plaid.model.identity_get_request import IdentityGetRequest
+from plaid.model.webhook_verification_key_get_request import WebhookVerificationKeyGetRequest
 
-# ---------- App ----------
+# ------------- App -------------
 app = FastMCP("compliance-suite")
 
-ROOT = pathlib.Path(__file__).resolve().parent
+# ------------- Paths (Pathlib-only, no duplicate assignments) -------------
+ROOT = Path(__file__).resolve().parent
+
 REPORTS_DIR = ROOT / "reports"
 AUDIT_DIR   = ROOT / "audit"
-STORE_FILE  = ROOT / "plaid_store.json"            # reused from your Plaid server
-CONF_FILE   = ROOT / "compliance_config.json"
-BLACKLIST   = ROOT / "compliance_blacklist.json"
-ALERTS_FILE = ROOT / "alerts.jsonl"
-AUDIT_LOG   = AUDIT_DIR / "audit_log.jsonl"
-STORE_PATH = os.path.join(os.path.dirname(__file__), "plaid_store.json")
-
 REPORTS_DIR.mkdir(exist_ok=True)
 AUDIT_DIR.mkdir(exist_ok=True)
 
-# ---------- Config (editable via tools) ----------
-DEFAULT_CONF: Dict[str, Any] = {
-    # Stripe
-    "stripe_high_amount_cents": 20_000,     # $200
-    "stripe_currency_allowlist": ["usd"],
-    "stripe_velocity_24h_limit": 5,         # per customer/payment_method
-    # Plaid
-    "plaid_high_amount_usd": 500.0,
-    "plaid_velocity_24h_limit": 20,
-    # Alerts / Risk
-    "risk_threshold_alert": 70,             # 0-100 -> write to alerts.jsonl
-}
+PLAID_STORE_FILE       = ROOT / "plaid_store.json"        # produced by your Plaid MCP
+COMPLIANCE_STORE_FILE  = ROOT / "compliance_store.json"   # state local to compliance
+CONF_FILE              = ROOT / "compliance_config.json"
+BLACKLIST_FILE         = ROOT / "compliance_blacklist.json"
+RULES_FILE             = ROOT / "compliance_rules.json"
+ALERTS_FILE            = ROOT / "alerts.jsonl"
+AUDIT_LOG              = AUDIT_DIR / "audit_log.jsonl"
 
-def _load_store() -> Dict[str, Any]:
-    if not os.path.exists(STORE_PATH):
-        return {}
-    with open(STORE_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+# Back-compat alias if other code expects STORE_PATH (points to compliance store)
+STORE_PATH = COMPLIANCE_STORE_FILE
 
-def _save_store(d: Dict[str, Any]) -> None:
-    with open(STORE_PATH, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2)
 
-def _token_for(alias_or_token: str) -> str:
-    """
-    Accepts either an alias saved in plaid_store.json or a raw token.
-    If it's not an alias we recognize, just pass it through unchanged.
-    """
-    if alias_or_token.startswith(("access-", "public-")):
-        return alias_or_token
-    store = _load_store()
-    return store.get("items", {}).get(alias_or_token, {}).get("access_token") or alias_or_token
-
-def _load_json(path: pathlib.Path, default: Any) -> Any:
-    if path.exists():
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+# ------------- Small JSON helpers -------------
+def _load_json(p: Path, default: Any) -> Any:
+    try:
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
     return default
 
-def _save_json(path: pathlib.Path, data: Any) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+def _json_default(o):
+    # make anything awkward JSON-safe
+    from datetime import date, datetime
+    if isinstance(o, (date, datetime)):
+        return o.isoformat()
+    if isinstance(o, Path):
+        return str(o)
+    return str(o)
 
-def _conf() -> Dict[str, Any]:
-    return _load_json(CONF_FILE, DEFAULT_CONF.copy())
 
-def _save_conf(d: Dict[str, Any]) -> None:
-    base = DEFAULT_CONF.copy()
-    base.update(d)
-    _save_json(CONF_FILE, base)
 
-def _blacklist() -> Dict[str, List[str]]:
-    return _load_json(BLACKLIST, {"merchant_names": [], "mccs": []})
+def _save_json(p: Path, data: Any) -> None:
+    p.write_text(json.dumps(data, indent=2, default=_json_default), encoding="utf-8")
 
-def _save_blacklist(d: Dict[str, List[str]]) -> None:
-    _save_json(BLACKLIST, d)
 
-# ---------- Audit / Alerts ----------
-def _audit_write(entry: Dict[str, Any]) -> None:
-    entry["ts"] = datetime.utcnow().isoformat() + "Z"
+# ------------- Configuration / State -------------
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "min_amount_flag_usd": 1000.0,
+    "include_pending": False,
+    "risk_categories": [],   # e.g., ["gambling", "crypto_exchange"]
+    "currencies": ["USD"],
+}
+
+def _get_config() -> Dict[str, Any]:
+    cfg = _load_json(CONF_FILE, {})
+    if not cfg:
+        _save_json(CONF_FILE, DEFAULT_CONFIG)
+        return dict(DEFAULT_CONFIG)
+    # ensure defaults exist without clobbering user-set overrides
+    merged = dict(DEFAULT_CONFIG); merged.update(cfg)
+    return merged
+
+
+def _append_audit(event: Dict[str, Any]) -> None:
+    event = dict(event)
+    event.setdefault("ts", datetime.utcnow().isoformat() + "Z")
     with AUDIT_LOG.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+        f.write(json.dumps(event) + "\n")
 
-def _alert_write(entry: Dict[str, Any]) -> None:
-    entry["ts"] = datetime.utcnow().isoformat() + "Z"
-    with ALERTS_FILE.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
 
-def audited(tool_fn):
-    @wraps(tool_fn)
-    def wrapper(*args, **kwargs):
-        try:
-            res = tool_fn(*args, **kwargs)
-            _audit_write({"tool": tool_fn.__name__, "args": _redact(kwargs), "ok": True})
-            return res
-        except Exception as e:
-            _audit_write({"tool": tool_fn.__name__, "args": _redact(kwargs), "ok": False, "error": str(e)})
-            raise
-    return wrapper
-
-def _redact(d: Dict[str, Any]) -> Dict[str, Any]:
-    # mask tokens/ids-ish
-    out = {}
-    for k, v in (d or {}).items():
-        if v is None:
-            out[k] = None
-            continue
-        s = str(v)
-        if any(key in k.lower() for key in ["token", "secret", "key"]):
-            out[k] = s[:6] + "…" if len(s) > 6 else "****"
-        else:
-            out[k] = v
-    return out
-
-# ---------- Stripe client ----------
-def _stripe() -> None:
-    key = os.environ.get("STRIPE_API_KEY")
-    if not key:
-        raise RuntimeError("Set STRIPE_API_KEY in the environment.")
-    stripe.api_key = key
-
-# ---------- Plaid client ----------
-def _plaid_host():
+# ------------- Plaid client utilities -------------
+def _resolve_plaid_host():
+    """Return a Plaid Environment value defensively across SDK versions."""
     env = os.environ.get("PLAID_ENV", "sandbox").lower()
     if env == "production":
         return getattr(plaid.Environment, "Production", plaid.Environment.Sandbox)
@@ -141,294 +112,386 @@ def _plaid_host():
         return getattr(plaid.Environment, "Development", getattr(plaid.Environment, "Sandbox", plaid.Environment.Production))
     return getattr(plaid.Environment, "Sandbox", plaid.Environment.Production)
 
-def _resolve_host():
-    env = os.environ.get("PLAID_ENV", "sandbox").lower()
-    if env == "production":
-        return getattr(plaid.Environment, "Production", plaid.Environment.Sandbox)
-    if env == "development":
-        return getattr(plaid.Environment, "Development", getattr(plaid.Environment, "Sandbox", plaid.Environment.Production))
-    return getattr(plaid.Environment, "Sandbox", plaid.Environment.Production)
 
-def _plaid_client() -> plaid_api.PlaidApi:
-    cid = os.environ.get("PLAID_CLIENT_ID")
-    sec = os.environ.get("PLAID_SECRET")
-    if not cid or not sec:
+def _new_plaid_client() -> plaid_api.PlaidApi:
+    client_id = os.environ.get("PLAID_CLIENT_ID")
+    secret    = os.environ.get("PLAID_SECRET")
+    if not client_id or not secret:
         raise RuntimeError("Set PLAID_CLIENT_ID and PLAID_SECRET in the environment.")
-    cfg = plaid.Configuration(
-        host=_resolve_host(),
-        api_key={"clientId": cid, "secret": sec},
-    )
+    cfg = plaid.Configuration(host=_resolve_plaid_host(), api_key={"clientId": client_id, "secret": secret})
     return plaid_api.PlaidApi(plaid.ApiClient(cfg))
 
+
+_PLAID_CLIENT: Optional[plaid_api.PlaidApi] = None
+def _plaid() -> plaid_api.PlaidApi:
+    """Lazy singleton so import never explodes if env isn’t set until runtime."""
+    global _PLAID_CLIENT
+    if _PLAID_CLIENT is None:
+        _PLAID_CLIENT = _new_plaid_client()
+    return _PLAID_CLIENT
+
+
 def _plaid_token_for(alias_or_token: str) -> str:
-    # read same file your Plaid server uses
-    if alias_or_token.startswith(("access-", "public-")):
-        return alias_or_token
-    if STORE_FILE.exists():
-        store = json.loads(STORE_FILE.read_text(encoding="utf-8"))
-        return store.get("items", {}).get(alias_or_token, {}).get("access_token") or alias_or_token
-    return alias_or_token
+    """
+    Accepts:
+      - a real access token (starts with 'access-')
+      - an alias saved in plaid_store.json or compliance_store.json
+      - a raw token (last resort)
+    """
+    s = str(alias_or_token).strip()
+    if s.startswith("access-"):
+        return s
 
-# ---------- Risk scoring helpers ----------
-def _score_reasons_to_score(reasons: List[str]) -> int:
-    # very simple: each reason +20; clamp 0..100
-    score = min(100, 20 * len(reasons))
-    return score
+    # Try multiple stores
+    candidates: list[Path] = []
+    try:
+        candidates.append(Path(STORE_FILE))
+    except Exception:
+        pass
+    try:
+        candidates.append(Path(STORE_PATH))
+    except Exception:
+        pass
 
-def _stripe_risk_for_pi(pi: Dict[str, Any], conf: Dict[str, Any], bl: Dict[str, List[str]]) -> Tuple[int, List[str]]:
-    reasons = []
-    amount = int(pi.get("amount", 0))
-    currency = (pi.get("currency") or "").lower()
-    if amount >= conf["stripe_high_amount_cents"]:
-        reasons.append(f"high_amount:{amount}")
-    if conf["stripe_currency_allowlist"] and currency not in [c.lower() for c in conf["stripe_currency_allowlist"]]:
-        reasons.append(f"currency_not_allowed:{currency}")
+    ROOT = Path(__file__).resolve().parent
+    candidates.extend([
+        ROOT / "plaid_store.json",
+        ROOT / "compliance_store.json",
+    ])
 
-    # charge-level hints
-    charges = pi.get("charges", {}).get("data", []) if isinstance(pi.get("charges"), dict) else []
-    if charges:
-        ch = charges[0]
-        outcome = (ch.get("outcome") or {})
-        risk_level = (outcome.get("risk_level") or "").lower()
-        if risk_level in {"highest", "elevated"}:
-            reasons.append(f"stripe_outcome_risk:{risk_level}")
-        fd = ch.get("fraud_details") or {}
-        if fd.get("user_report") or fd.get("stripe_report"):
-            reasons.append("fraud_reported")
+    for p in candidates:
+        try:
+            if not p or not p.exists():
+                continue
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        items = data.get("items") or {}
+        if s in items and isinstance(items[s], dict) and items[s].get("access_token"):
+            return items[s]["access_token"]
 
-        mname = (ch.get("payment_method_details", {}) or {}).get("card", {}) or {}
-        brand = mname.get("brand")
-        if brand and str(brand).lower() in [b.lower() for b in bl.get("merchant_names", [])]:
-            reasons.append(f"brand_blacklisted:{brand}")
+    # Fallback: treat input as access token
+    return s
 
-    return _score_reasons_to_score(reasons), reasons
+# ------------- Stripe helper (optional) -------------
+def _stripe_ready() -> bool:
+    key = os.environ.get("STRIPE_API_KEY")
+    return bool(stripe and key)
 
-def _plaid_risk_for_tx(tx: Dict[str, Any], conf: Dict[str, Any], bl: Dict[str, List[str]]) -> Tuple[int, List[str]]:
-    reasons = []
-    amt = abs(float(tx.get("amount") or 0.0))
-    if amt >= float(conf["plaid_high_amount_usd"]):
-        reasons.append(f"high_amount_usd:{amt}")
-    name = (tx.get("name") or "").lower()
-    if any(b.lower() in name for b in bl.get("merchant_names", [])):
-        reasons.append("merchant_blacklisted")
-    # category heuristic
-    cats = tx.get("category") or []
-    cats_l = [str(c).lower() for c in cats]
-    if "cash advance" in cats_l or "fraudulent" in cats_l:
-        reasons.append("category_flag")
-    return _score_reasons_to_score(reasons), reasons
 
-def _write_csv(path: pathlib.Path, rows: List[Dict[str, Any]]) -> None:
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    headers = sorted({k for r in rows for k in r.keys()})
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=headers)
-        w.writeheader()
-        w.writerows(rows)
+def _init_stripe():
+    if not _stripe_ready():
+        raise RuntimeError("Stripe not configured. Set STRIPE_API_KEY (test or live) to enable Stripe checks.")
+    stripe.api_key = os.environ["STRIPE_API_KEY"]
 
-# ---------- Tools: config / blacklist / audit ----------
+def _canon_text(x: Any) -> str:
+    """Safe canonicalization: works for None, str, list, dict, etc."""
+    if x is None:
+        return ""
+    if isinstance(x, (list, tuple)):
+        x = " ".join(map(str, x))
+    elif isinstance(x, dict):
+        try:
+            x = " ".join(f"{k}:{v}" for k, v in sorted(x.items()))
+        except Exception:
+            x = str(x)
+    return " ".join(str(x).split()).lower()
+
+try:
+    BLACKLIST  # reuse if already defined elsewhere
+except NameError:
+    ROOT = Path(__file__).resolve().parent
+    BLACKLIST = ROOT / "compliance_blacklist.json"
+
+def _bl_norm(s: str) -> str:
+    return " ".join(str(s).split()).lower()
+
+def _bl_pick_name(merchant_name=None, merchant=None, name=None) -> str:
+    for v in (merchant_name, merchant, name):
+        if v is not None:
+            txt = str(v).strip()
+            if txt:
+                return txt
+    raise ValueError("Provide a merchant name via 'merchant_name' (or 'merchant'/'name').")
+
+def _bl_load() -> dict:
+    if not BLACKLIST.exists():
+        return {"merchants": []}
+    try:
+        return json.loads(BLACKLIST.read_text(encoding="utf-8"))
+    except Exception:
+        # corrupt or empty file; start fresh
+        return {"merchants": []}
+
+def _bl_save(data: dict) -> None:
+    BLACKLIST.parent.mkdir(parents=True, exist_ok=True)
+    BLACKLIST.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+# ------------- Tools -------------
+
 @app.tool()
-@audited
-def compliance_config_get() -> Dict[str, Any]:
-    """Return current compliance configuration."""
-    return _conf()
+def info() -> Dict[str, Any]:
+    """
+    Show compliance suite status, paths, and which integrations are enabled.
+    """
+    env = {
+        "PLAID_ENV": os.environ.get("PLAID_ENV", "sandbox"),
+        "PLAID_CLIENT_ID_set": bool(os.environ.get("PLAID_CLIENT_ID")),
+        "PLAID_SECRET_set": bool(os.environ.get("PLAID_SECRET")),
+        "STRIPE_API_KEY_set": bool(os.environ.get("STRIPE_API_KEY")),
+    }
+    paths = {
+        "reports_dir": str(REPORTS_DIR),
+        "audit_dir": str(AUDIT_DIR),
+        "plaid_store_file": str(PLAID_STORE_FILE),
+        "compliance_store_file": str(COMPLIANCE_STORE_FILE),
+        "config_file": str(CONF_FILE),
+        "blacklist_file": str(BLACKLIST_FILE),
+        "rules_file": str(RULES_FILE),
+        "alerts_file": str(ALERTS_FILE),
+        "audit_log": str(AUDIT_LOG),
+    }
+    out = {
+        "name": "compliance-suite",
+        "integrations": {
+            "plaid": True,
+            "stripe": _stripe_ready(),
+        },
+        "env": env,
+        "paths": paths,
+        "config": _get_config(),
+    }
+    _append_audit({"event": "info"})
+    return out
+
 
 @app.tool()
-@audited
-def compliance_config_set(
-    stripe_high_amount_cents: Optional[int] = None,
-    stripe_currency_allowlist: Optional[List[str]] = None,
-    stripe_velocity_24h_limit: Optional[int] = None,
-    plaid_high_amount_usd: Optional[float] = None,
-    plaid_velocity_24h_limit: Optional[int] = None,
-    risk_threshold_alert: Optional[int] = None,
+def config_set(
+    min_amount_flag_usd: Optional[float] = None,
+    include_pending: Optional[bool] = None,
+    currencies: Optional[List[str]] = None,
+    risk_categories: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Update parts of the compliance configuration."""
-    c = _conf()
-    if stripe_high_amount_cents is not None: c["stripe_high_amount_cents"] = int(stripe_high_amount_cents)
-    if stripe_currency_allowlist is not None: c["stripe_currency_allowlist"] = list(stripe_currency_allowlist)
-    if stripe_velocity_24h_limit is not None: c["stripe_velocity_24h_limit"] = int(stripe_velocity_24h_limit)
-    if plaid_high_amount_usd is not None: c["plaid_high_amount_usd"] = float(plaid_high_amount_usd)
-    if plaid_velocity_24h_limit is not None: c["plaid_velocity_24h_limit"] = int(plaid_velocity_24h_limit)
-    if risk_threshold_alert is not None: c["risk_threshold_alert"] = int(risk_threshold_alert)
-    _save_conf(c)
-    return c
+    """
+    Update compliance configuration. Only provided fields change.
+    """
+    cfg = _get_config()
+    if min_amount_flag_usd is not None:
+        cfg["min_amount_flag_usd"] = float(min_amount_flag_usd)
+    if include_pending is not None:
+        cfg["include_pending"] = bool(include_pending)
+    if currencies is not None:
+        cfg["currencies"] = [str(c).upper() for c in currencies if c]
+    if risk_categories is not None:
+        cfg["risk_categories"] = [str(rc).lower() for rc in risk_categories if rc]
+    _save_json(CONF_FILE, cfg)
+    _append_audit({"event": "config_set", "config": cfg})
+    return {"ok": True, "config": cfg}
+
 
 @app.tool()
-@audited
-def blacklist_add(merchant_names: Optional[List[str]] = None, mccs: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Add merchant names or MCCs to blacklist."""
-    bl = _blacklist()
-    if merchant_names:
-        for n in merchant_names:
-            if n not in bl["merchant_names"]: bl["merchant_names"].append(n)
-    if mccs:
-        for m in mccs:
-            if m not in bl["mccs"]: bl["mccs"].append(m)
-    _save_blacklist(bl)
+def blacklist_add(
+    merchant_name: Optional[str] = None,
+    merchant: Optional[str] = None,
+    name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Add a merchant to the blacklist. Accepts any of: merchant_name, merchant, or name.
+    - Normalizes case/spacing for duplicate detection.
+    - Creates the blacklist file if missing.
+    """
+    try:
+        nm = _bl_pick_name(merchant_name, merchant, name)
+    except ValueError as e:
+        return {"added": False, "reason": "validation_error", "message": str(e)}
+
+    canon = _bl_norm(nm)
+    data = _bl_load()
+    entries = data.get("merchants", [])
+
+    # already present?
+    for m in entries:
+        if _bl_norm(m.get("name", "")) == canon or m.get("canonical") == canon:
+            return {
+                "added": False,
+                "reason": "already_exists",
+                "name": nm,
+                "canonical": canon,
+                "count": len(entries),
+            }
+
+    entries.append({
+        "name": nm,
+        "canonical": canon,
+        "added_at": datetime.utcnow().isoformat() + "Z",
+    })
+    data["merchants"] = entries
+    _bl_save(data)
+
+    return {"added": True, "name": nm, "canonical": canon, "count": len(entries), "file": str(BLACKLIST)}
+
+@app.tool()
+def blacklist_list() -> Dict[str, Any]:
+    """
+    List the current blacklist entries.
+    """
+    bl = _load_json(BLACKLIST_FILE, {"merchants": []})
     return bl
 
-@app.tool()
-@audited
-def blacklist_list() -> Dict[str, Any]:
-    """Return blacklist."""
-    return _blacklist()
 
 @app.tool()
-@audited
-def audit_tail(lines: int = 50) -> Dict[str, Any]:
-    """Show last N audit entries."""
-    if not AUDIT_LOG.exists(): return {"audit": []}
-    with AUDIT_LOG.open("r", encoding="utf-8") as f:
-        rows = f.read().splitlines()[-max(1, lines):]
-        return {"audit": [json.loads(r) for r in rows]}
-
-@app.tool()
-@audited
-def alerts_tail(lines: int = 50) -> Dict[str, Any]:
-    """Show last N alerts (high-risk findings)."""
-    if not ALERTS_FILE.exists(): return {"alerts": []}
-    with ALERTS_FILE.open("r", encoding="utf-8") as f:
-        rows = f.read().splitlines()[-max(1, lines):]
-        return {"alerts": [json.loads(r) for r in rows]}
-
-# ---------- Tools: Stripe scanning ----------
-@app.tool()
-@audited
-def scan_stripe_payments(days: int = 30, limit: int = 200) -> Dict[str, Any]:
-    """
-    Pull recent PaymentIntents from Stripe and score for risk.
-    Creates CSV/JSON in /reports and returns a summary.
-    """
-    _stripe()
-    conf = _conf()
-    bl   = _blacklist()
-
-    since = int(time.time()) - max(1, days) * 86400
-    items: List[Dict[str, Any]] = []
-    high: List[Dict[str, Any]] = []
-
-    # paginate PaymentIntents
-    starting_after = None
-    fetched = 0
-    while True:
-        resp = stripe.PaymentIntent.list(
-            created={"gte": since},
-            limit=min(100, max(1, limit - fetched)),
-            starting_after=starting_after
-        )
-        data = resp.get("data", [])
-        if not data: break
-        for pi in data:
-            d = pi.to_dict() if hasattr(pi, "to_dict") else dict(pi)
-            score, reasons = _stripe_risk_for_pi(d, conf, bl)
-            row = {
-                "payment_intent": d.get("id"),
-                "amount": d.get("amount"),
-                "currency": d.get("currency"),
-                "status": d.get("status"),
-                "created": d.get("created"),
-                "risk_score": score,
-                "reasons": ";".join(reasons),
-            }
-            items.append(row)
-            if score >= conf["risk_threshold_alert"]:
-                _alert_write({"source": "stripe", **row})
-                high.append(row)
-        fetched += len(data)
-        if fetched >= limit or not resp.get("has_more"): break
-        starting_after = data[-1]["id"]
-
-    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    csv_path  = REPORTS_DIR / f"stripe_report_{ts}.csv"
-    json_path = REPORTS_DIR / f"stripe_report_{ts}.json"
-    _write_csv(csv_path, items)
-    json_path.write_text(json.dumps(items, indent=2), encoding="utf-8")
-
-    return {
-        "count": len(items),
-        "high_risk": len(high),
-        "report_csv": str(csv_path),
-        "report_json": str(json_path),
-        "sample": items[:5],
-    }
-
-# ---------- Tools: Plaid scanning ----------
-@app.tool()
-@audited
-def plaid_transactions_scan(
+def scan_plaid_transactions(
     key: str,
     days: int = 30,
-    count: int = 50,
+    min_amount: Optional[float] = None,
+    include_pending: bool = True,
+    count: int = 100,
     offset: int = 0,
-) -> dict:
+) -> Dict[str, Any]:
     """
-    Compliance scan: fetch recent transactions from Plaid.
-    - Accepts an alias or raw access token in `key`
-    - Uses date objects first; falls back to ISO strings if your SDK wants those
+    Scan Plaid transactions with safe date types, robust merchant normalization,
+    blacklist checks, and optional filters.
     """
-    client = _plaid_client()
-    access_token = _token_for(key)
-
-    # Build proper date objects
+    # --- dates must be datetime.date objects for typed SDKs ---
     end_dt = date.today()
     start_dt = end_dt - timedelta(days=max(1, int(days)))
 
-    # Always build options as proper model types
-    opts = TransactionsGetRequestOptions(count=int(count), offset=int(offset))
+    # --- resolve token & get client ---
+    access_token = _plaid_token_for(key)
+    client = _plaid()  # reuse your existing Plaid client factory
 
-    used_encoding = "date_objects"
-    try:
-        # Preferred: pass date objects (most modern plaid-python builds expect this)
-        req = TransactionsGetRequest(
-            access_token=access_token,
-            start_date=start_dt,
-            end_date=end_dt,
-            options=opts,
-        )
-        resp = client.transactions_get(req)
-    except Exception as e:
-        msg = str(e)
-        # If your local plaid SDK is the variant that expects strings, fall back automatically
-        needs_string = ("Required value type is str" in msg) or ("passed type was date at ['start_date']" in msg)
-        if needs_string:
-            used_encoding = "iso_strings_fallback"
-            req = TransactionsGetRequest(
-                access_token=access_token,
-                start_date=start_dt.isoformat(),
-                end_date=end_dt.isoformat(),
-                options=opts,
-            )
-            resp = client.transactions_get(req)
-        else:
-            # Re-raise anything unrelated to type expectations
-            raise
+    # --- request (typed model expects date objects) ---
+    req = TransactionsGetRequest(
+        access_token=access_token,
+        start_date=start_dt,          # <-- date object
+        end_date=end_dt,              # <-- date object
+        options=TransactionsGetRequestOptions(
+            count=int(count),
+            offset=int(offset),
+            # include_personal_finance_category=True  # uncomment if you need PFC
+        ),
+    )
+    resp = client.transactions_get(req).to_dict()
+    txs = resp.get("transactions", [])
 
-    data = resp.to_dict()
-    tx = []
-    for t in data.get("transactions", []):
-        tx.append({
-            "tx_id": t.get("transaction_id"),
-            "account_id": t.get("account_id"),
-            "date": t.get("date"),
-            "name": t.get("name"),
-            "amount": t.get("amount"),
-            "category": t.get("category"),
-            "pending": t.get("pending"),
-        })
+    # --- filters (safe) ---
+    if min_amount is not None:
+        try:
+            thr = float(min_amount)
+            txs = [t for t in txs if abs(float(t.get("amount", 0))) >= thr]
+        except Exception:
+            pass
+    if not include_pending:
+        txs = [t for t in txs if not bool(t.get("pending"))]
 
-    return {
-        "request_dates": {
-            "start_date": start_dt.isoformat(),
-            "end_date": end_dt.isoformat(),
-            "encoding_used": used_encoding,  # helps confirm which branch was taken
-        },
-        "total": data.get("total_transactions", len(tx)),
-        "transactions": tx,
+    # --- blacklist check ---
+    bl = _bl_load()
+    bl_set = {
+        _canon_text(m.get("canonical") or m.get("name", ""))
+        for m in bl.get("merchants", [])
     }
 
-# ---------- Entry ----------
+    for t in txs:
+        # merchant/name can sometimes be None; normalize safely
+        mname = t.get("merchant_name") or t.get("name")
+        canon = _canon_text(mname)
+        t["merchant_canonical"] = canon
+        t["is_blacklisted"] = canon in bl_set
+
+    # --- report out ---
+    meta = {
+        "key": key,
+        "start_date": start_dt.isoformat(),
+        "end_date": end_dt.isoformat(),
+        "requested_count": int(count),
+        "returned": len(txs),
+        "min_amount": min_amount,
+        "include_pending": include_pending,
+        "blacklist_hits": sum(1 for t in txs if t.get("is_blacklisted")),
+        "total_in_window": resp.get("total_transactions"),
+    }
+
+    # write report file
+    try:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    out_path = (REPORTS_DIR if 'REPORTS_DIR' in globals() else Path(__file__).with_name("reports"))
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_file = out_path / f"plaid_scan_{key}_{start_dt}_{end_dt}.json"
+    out_file.write_text(
+    json.dumps({"transactions": txs, "meta": meta}, indent=2, default=_json_default),
+    encoding="utf-8")
+
+    # audit (best-effort)
+    try:
+        _append_audit({"event": "plaid_scan", **meta, "report_file": str(out_file)})
+    except Exception:
+        pass
+
+    return {"ok": True, "report_file": str(out_file), **meta}
+
+
+@app.tool()
+def audit_log_tail(n: int = 100) -> Dict[str, Any]:
+    """
+    Return the last n audit events.
+    """
+    lines: List[str] = []
+    try:
+        with AUDIT_LOG.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        pass
+
+    tail = [json.loads(x) for x in lines[-max(1, n):]]
+    return {"events": tail}
+
+
+@app.tool()
+def stripe_payment_intent_status(payment_intent_id: str) -> Dict[str, Any]:
+    """
+    Optional: Check a Stripe PaymentIntent status (requires STRIPE_API_KEY).
+    """
+    _init_stripe()
+    pi = stripe.PaymentIntent.retrieve(payment_intent_id)  # type: ignore[attr-defined]
+    _append_audit({"event": "stripe_pi_status", "pi": payment_intent_id, "status": pi.get("status")})
+    return {
+        "id": pi.get("id"),
+        "amount": pi.get("amount"),
+        "currency": pi.get("currency"),
+        "status": pi.get("status"),
+        "charges": [{"id": c.get("id"), "paid": c.get("paid"), "status": c.get("status")} for c in pi.get("charges", {}).get("data", [])],
+    }
+
+
+# (Optional) Plaid webhook verification helper for server routes (not a tool)
+def verify_plaid_webhook(plaid_verification_jwt: str, raw_body: bytes) -> bool:
+    """
+    Example of verifying Plaid webhook JWT (for use in your HTTP server).
+    """
+    try:
+        unverified_header = jwt.get_unverified_header(plaid_verification_jwt)  # type: ignore[name-defined]
+        if unverified_header.get("alg") != "ES256":
+            return False
+        kid = unverified_header["kid"]
+        key_resp = _plaid().webhook_verification_key_get(
+            WebhookVerificationKeyGetRequest(key_id=kid)
+        )
+        jwk = key_resp.to_dict().get("key")
+        from jose import jwt as _jwt  # local import to avoid hard dependency if unused
+        claims = _jwt.decode(
+            plaid_verification_jwt,
+            key=jwk, algorithms=["ES256"],
+            options={"verify_aud": False, "verify_iss": False},
+            leeway=0,
+        )
+        body_hash = hashlib.sha256(raw_body).hexdigest()
+        return body_hash == claims.get("request_body_sha256")
+    except Exception:
+        return False
+
+
+# ------------- Entry -------------
 if __name__ == "__main__":
     app.run()

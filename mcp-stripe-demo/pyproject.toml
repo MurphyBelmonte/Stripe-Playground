@@ -11,4 +11,5 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "plaid-python>=36.0.0",
     "python-jose>=3.3.0",
+    "xero-python>=9.0.0",
 ]

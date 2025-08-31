@@ -1,0 +1,4 @@
+Flask==2.1.1
+Flask-OAuthlib==0.9.6
+xero-python==9.0.0
+
