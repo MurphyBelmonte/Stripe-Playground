@@ -2,6 +2,7 @@
 from __future__ import annotations
 import csv, io
 import os, shutil, base64, re
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -18,6 +19,7 @@ app = FastMCP("xero-mcp")
 
 EXPORTS_DIR = Path(__file__).resolve().parent / "exports"
 EXPORTS_DIR.mkdir(exist_ok=True)
+TENANT_FILE = Path(__file__).with_name("xero_tenant.json")
 
 def _now_slug():
     return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -31,6 +33,28 @@ def _tenant() -> str:
         raise RuntimeError("No tenant_id found. Log in via Flask app first, then try again.")
     return tid
 
+def _save_tenant(tenant_id: str) -> None:
+    try:
+        TENANT_FILE.write_text(json.dumps({"tenant_id": tenant_id}, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def _load_tenant() -> str | None:
+    try:
+        data = json.loads(TENANT_FILE.read_text(encoding="utf-8"))
+        return data.get("tenant_id")
+    except Exception:
+        return None
+
+def _tenant_or_die(explicit_tenant_id: str | None) -> str:
+    """Use an explicitly provided tenant_id, or a stored one, or raise with guidance."""
+    tid = explicit_tenant_id or _load_tenant()
+    if not tid:
+        raise RuntimeError(
+            "No tenant_id found. Log in via the Flask app (/login) or call xero_set_tenant first."
+        )
+    return tid
+
 @app.tool()
 def xero_whoami() -> Dict[str, Any]:
     """Show current tenant and simple status."""
@@ -40,7 +64,8 @@ def xero_whoami() -> Dict[str, Any]:
 def xero_set_tenant(tenant_id: str) -> dict:
     """Manually set the Xero tenant_id stored for MCP."""
     set_tenant_id(tenant_id)
-    return {"ok": True, "tenant_id": tenant_id}
+    _save_tenant(tenant_id)
+    return {"ok": True, "tenant_id": tenant_id, "saved_to": str(TENANT_FILE)}
 
 @app.tool()
 def xero_list_contacts(limit: int = 10, order: str = "Name ASC") -> Dict[str, Any]:

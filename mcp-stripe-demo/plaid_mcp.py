@@ -221,6 +221,16 @@ def accounts_and_balances(key: str) -> Dict[str, Any]:
     return {"accounts": out}
 
 @app.tool()
+def list_items() -> Dict[str, Any]:
+    """
+    Show saved Plaid item aliases and basic info from plaid_store.json.
+    """
+    store = _load_store()
+    items = store.get("items", {})
+    return {"count": len(items), "aliases": list(items.keys())}
+
+
+@app.tool()
 def transactions_get(
     key: str,
     days: int = 30,
@@ -298,6 +308,19 @@ def remove_item(key: str) -> Dict[str, Any]:
         store["items"].pop(key, None)
         _save_store(store)
     return {"removed": key}
+
+@app.tool()
+def whoami() -> Dict[str, Any]:
+    """
+    Basic environment sanity for Plaid MCP.
+    """
+    return {
+        "env": os.environ.get("PLAID_ENV", "sandbox"),
+        "PLAID_CLIENT_ID_set": bool(os.environ.get("PLAID_CLIENT_ID")),
+        "PLAID_SECRET_set": bool(os.environ.get("PLAID_SECRET")),
+        "store_path": STORE_PATH,
+    }
+
 
 # -------- Optional: Plaid webhook verification helper --------
 def verify_plaid_webhook(plaid_verification_jwt: str, raw_body: bytes) -> bool:

@@ -95,11 +95,45 @@ def _get_config() -> Dict[str, Any]:
     return merged
 
 
+def _now_ts() -> str:
+    return datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+
+def _rotate_if_big(p: Path, max_bytes: int = 5 * 1024 * 1024) -> None:
+    try:
+        if p.exists() and p.stat().st_size >= max_bytes:
+            rotated = p.with_name(p.stem + f"_{_now_ts()}" + p.suffix)
+            p.rename(rotated)
+    except Exception:
+        pass
+
+
 def _append_audit(event: Dict[str, Any]) -> None:
     event = dict(event)
     event.setdefault("ts", datetime.utcnow().isoformat() + "Z")
+    _rotate_if_big(AUDIT_LOG)  # <--- rotate if too large
     with AUDIT_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event) + "\n")
+
+def _load_rules() -> Dict[str, Any]:
+    """
+    Try to load compliance_rules.json; if missing, seed a minimal default.
+    """
+    default_rules = {
+        "high_risk_categories": ["gambling", "crypto_exchange"],
+        "block_if_over_usd": 5000,
+        "flag_if_merchant_matches": ["coffee shop", "random llc"]
+    }
+    try:
+        if RULES_FILE.exists():
+            return json.loads(RULES_FILE.read_text(encoding="utf-8")) or default_rules
+    except Exception:
+        pass
+    # seed a default file for convenience
+    try:
+        RULES_FILE.write_text(json.dumps(default_rules, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return default_rules
 
 
 # ------------- Plaid client utilities -------------
@@ -397,6 +431,39 @@ def scan_plaid_transactions(
         canon = _canon_text(mname)
         t["merchant_canonical"] = canon
         t["is_blacklisted"] = canon in bl_set
+    
+        # --- rule matching ---
+    rules = _load_rules()
+    hi_risk_cats = {str(x).strip().lower() for x in rules.get("high_risk_categories", [])}
+    merchant_needles = [m.strip().lower() for m in rules.get("flag_if_merchant_matches", []) if m]
+    block_over = float(rules.get("block_if_over_usd", 0) or 0)
+
+    def _matches_rules(t: dict) -> list[str]:
+        hits: list[str] = []
+        # category match (Plaid categories may be list or string)
+        cats = t.get("category") or []
+        cats = [str(c).strip().lower() for c in (cats if isinstance(cats, list) else [cats])]
+        if any(c in hi_risk_cats for c in cats):
+            hits.append("high_risk_category")
+
+        # merchant substring match
+        canon = t.get("merchant_canonical") or _canon_text(t.get("merchant_name") or t.get("name"))
+        for needle in merchant_needles:
+            if needle and needle in (canon or ""):
+                hits.append(f"merchant_match:{needle}")
+
+        # amount threshold (absolute value)
+        try:
+            if block_over and abs(float(t.get("amount", 0))) >= block_over:
+                hits.append(f"amount_over_usd_{int(block_over)}")
+        except Exception:
+            pass
+
+        return hits
+
+    for t in txs:
+        t["matched_rules"] = _matches_rules(t)
+
 
     # --- report out ---
     meta = {
@@ -410,6 +477,8 @@ def scan_plaid_transactions(
         "blacklist_hits": sum(1 for t in txs if t.get("is_blacklisted")),
         "total_in_window": resp.get("total_transactions"),
     }
+    
+    meta["rule_hits"] = sum(1 for t in txs if t.get("matched_rules"))
 
     # write report file
     try:
