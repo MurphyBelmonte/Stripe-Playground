@@ -1,8 +1,3 @@
-
-# Project Title
-
-A brief description of what this project does and who it's for
-
 # Financial Command Center (MCP Integrations)
 
 This repo (`Stripe Playground`) contains a **Modular Command Protocol (MCP) integration suite** that unifies:
