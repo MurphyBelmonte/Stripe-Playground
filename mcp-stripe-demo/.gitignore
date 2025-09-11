@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Tokens / secrets
+tokens/
+*.json
+
+# Local exports
+exports/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# env
+.env
+*.key
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

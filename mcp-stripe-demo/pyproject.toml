@@ -1,0 +1,15 @@
+[project]
+name = "mcp-stripe-demo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "mcp[cli]>=1.13.1",
+    "stripe>=12.5.0",
+    "fastapi>=0.112.0",
+    "uvicorn[standard]>=0.30.0",
+    "plaid-python>=36.0.0",
+    "python-jose>=3.3.0",
+    "xero-python>=9.0.0",
+]

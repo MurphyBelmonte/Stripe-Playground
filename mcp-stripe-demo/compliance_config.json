@@ -1,0 +1,19 @@
+{
+  "min_amount_flag_usd": 250.0,
+  "include_pending": false,
+  "risk_categories": [
+    "crypto_exchange",
+    "gambling"
+  ],
+  "currencies": [
+    "USD"
+  ],
+  "stripe_high_amount_cents": 30000,
+  "stripe_currency_allowlist": [
+    "usd"
+  ],
+  "stripe_velocity_24h_limit": 5,
+  "plaid_high_amount_usd": 500.0,
+  "plaid_velocity_24h_limit": 20,
+  "risk_threshold_alert": 60
+}
