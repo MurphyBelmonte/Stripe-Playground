@@ -25,3 +25,22 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Test/coverage artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+reports/
+
+# Deprecated/legacy directory now empty
+mcp-stripe-demo/
+
+# Editor/IDE folders
+.vscode/
+.idea/
+.claude/
+.benchmarks/
+.cache/

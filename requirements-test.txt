@@ -1,0 +1,25 @@
+# requirements-test.txt - Testing dependencies
+# Core testing framework
+pytest==7.4.2
+pytest-cov==4.1.0
+pytest-mock==3.11.1
+pytest-flask==1.2.0
+pytest-html==3.2.0
+
+# Test utilities
+factory-boy==3.3.0
+faker==19.6.2
+responses==0.23.3
+freezegun==1.2.2
+
+# Mocking and fixtures
+pytest-fixture-order==0.1.4
+pytest-benchmark==4.0.0
+
+# Code quality
+flake8==6.0.0
+black==23.7.0
+isort==5.12.0
+
+# Coverage reporting
+coverage==7.3.0

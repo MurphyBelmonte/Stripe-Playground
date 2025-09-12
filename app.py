@@ -543,7 +543,7 @@ def admin_dashboard():
     <body>
         <div class="container">
             <div class="header">
-                <h1>Financial Command Center AI</h1>
+                <h1>🏦 Financial Command Center AI</h1>
                 <p>Admin Dashboard - API Key Management & Monitoring</p>
             </div>
             
@@ -567,7 +567,7 @@ def admin_dashboard():
             </div>
             
             <div class="section">
-                <h2>API Keys Management</h2>
+                <h2>🔑 API Keys Management</h2>
                 {% if api_keys %}
                     {% for key, info in api_keys.items() %}
                     <div class="api-key">
@@ -593,7 +593,7 @@ def admin_dashboard():
             </div>
             
             <div class="section">
-                <h2>Recent Activity</h2>
+                <h2>📊 Recent Activity</h2>
                 {% if recent_events %}
                     {% for event in recent_events %}
                     <div class="event">
@@ -610,7 +610,7 @@ def admin_dashboard():
             </div>
             
             <div class="section">
-                <h2>Quick Actions</h2>
+                <h2>🚀 Quick Actions</h2>
                 <a href="/health" class="btn">💓 Health Check</a>
                 <a href="/login" class="btn">🔗 Connect Xero</a>
                 <a href="/admin/create-demo-key" class="btn">🔑 Create Demo Key</a>
