@@ -160,7 +160,7 @@ def index():
     <body>
         <div class="container">
             <div class="header">
-                <h1>🏦 Financial Command Center AI</h1>
+                <h1>Financial Command Center AI</h1>
                 <p>Unified Financial Operations Platform</p>
             </div>
             
@@ -543,7 +543,7 @@ def admin_dashboard():
     <body>
         <div class="container">
             <div class="header">
-                <h1>🏦 Financial Command Center AI</h1>
+                <h1>Financial Command Center AI</h1>
                 <p>Admin Dashboard - API Key Management & Monitoring</p>
             </div>
             
@@ -724,6 +724,44 @@ if __name__ == '__main__':
     print("🚀 Starting Enhanced Financial Command Center...")
     print("=" * 60)
     print(f"🔐 Security: {'Enabled' if SECURITY_ENABLED else 'Disabled (install auth/security.py)'}")
+    
+    # Initialize SSL certificate management
+    try:
+        from cert_manager import CertificateManager
+        from server_modes import configure_server_mode
+        
+        cert_manager = CertificateManager()
+        ssl_context = None
+        server_mode = "HTTPS"
+        
+        # Configure server mode management
+        configure_server_mode(app)
+        
+        # Check SSL mode preference
+        force_https = os.getenv('FORCE_HTTPS', 'true').lower() == 'true'
+        allow_http = os.getenv('ALLOW_HTTP', 'false').lower() == 'true'
+        
+        if force_https or not allow_http:
+            # HTTPS mode - generate certificates if needed
+            print("🔐 HTTPS Mode - Ensuring SSL certificates...")
+            cert_generated = cert_manager.ensure_certificates()
+            ssl_context = cert_manager.get_ssl_context()
+            
+            if cert_generated:
+                print("✨ New SSL certificates generated!")
+                print("📦 To eliminate browser warnings, install the CA certificate:")
+                print(f"   python cert_manager.py --bundle")
+        else:
+            # HTTP mode with warnings
+            server_mode = "HTTP (with HTTPS upgrade prompts)"
+            print("⚠️  HTTP Mode - Running without SSL encryption")
+            print("   Set FORCE_HTTPS=true for production use")
+    
+    except ImportError as e:
+        print("⚠️  SSL Certificate Manager not available - using Flask's adhoc SSL")
+        print(f"   Install missing dependencies: {e}")
+        ssl_context = 'adhoc'
+    
     print("📋 Available endpoints:")
     print("  GET  / - Enhanced home page")
     print("  GET  /health - System health check")
@@ -751,12 +789,17 @@ if __name__ == '__main__':
     print("  🎛️  Admin Interface:")
     print("    GET  /admin/dashboard - Admin dashboard")
     print("    GET  /admin/create-demo-key - Create demo key")
+    print("    GET  /admin/ssl-help - SSL setup guide")
+    print("    GET  /admin/certificate-bundle - Download certificate bundle")
     
     print()
+    protocol = "https" if ssl_context else "http"
+    port = 8000
     print("🌐 URLs:")
-    print("  🏠 Home: https://localhost:8000/")
-    print("  🎛️  Admin: https://localhost:8000/admin/dashboard")
-    print("  💓 Health: https://localhost:8000/health")
+    print(f"  🏠 Home: {protocol}://localhost:{port}/")
+    print(f"  🎛️  Admin: {protocol}://localhost:{port}/admin/dashboard")
+    print(f"  💓 Health: {protocol}://localhost:{port}/health")
+    print(f"  🔧 SSL Help: {protocol}://localhost:{port}/admin/ssl-help")
     print()
     
     if not SECURITY_ENABLED:
@@ -766,7 +809,25 @@ if __name__ == '__main__':
         print("   3. Restart application")
         print()
     
+    print(f"🔒 Server Mode: {server_mode}")
+    if ssl_context:
+        print("📜 SSL Certificate Status:")
+        try:
+            health = cert_manager.health_check()
+            print(f"   ✅ Certificate Valid: {health['certificate_valid']}")
+            print(f"   📅 Expires: {health['expires']}")
+            print(f"   🏷️  Hostnames: {', '.join(health['hostnames'])}")
+            if not health['certificate_valid']:
+                print("   🔄 Certificates will be regenerated automatically")
+        except Exception as e:
+            print(f"   ⚠️  Certificate check failed: {e}")
+    
+    print()
     print("🔥 Ready for client demonstrations!")
     
-    # Your existing SSL configuration - running on https://localhost:8000
-    app.run(host='localhost', port=8000, debug=True, ssl_context='adhoc')
+    # Start the Flask application
+    if ssl_context:
+        app.run(host='localhost', port=port, debug=True, ssl_context=ssl_context)
+    else:
+        # HTTP mode
+        app.run(host='localhost', port=port, debug=True)

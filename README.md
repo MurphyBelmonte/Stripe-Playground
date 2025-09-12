@@ -44,6 +44,77 @@ It enables natural-language control of real financial workflows via Claude Deskt
 - Stripe helper: `stripe_payment_intent_status`
 - Server helper: `verify_plaid_webhook`
 
+### 🔹 SSL Certificate Management
+- **Automatic Certificate Generation**: Self-signed CA and server certificates
+- **Professional Security Warnings**: HTTP to HTTPS redirects with security explanations
+- **Client-Friendly Installation**: Automated certificate bundles for all platforms
+- **Docker Integration**: Complete SSL termination and certificate management
+- **Health Monitoring**: SSL certificate status and validation endpoints
+
+---
+
+## 🔐 SSL Certificate Setup
+
+Financial Command Center AI includes comprehensive SSL certificate management for secure local development and production deployment.
+
+### Quick SSL Setup
+
+1. **Automatic Setup** (Recommended):
+   ```bash
+   # Start either application - certificates generate automatically
+   python app.py
+   # or
+   python app_with_setup_wizard.py
+   ```
+
+2. **Manual Certificate Generation**:
+   ```bash
+   # Generate SSL certificates
+   python cert_manager.py --generate
+   
+   # Create client installation bundle  
+   python cert_manager.py --bundle
+   ```
+
+3. **Install Certificate** (Eliminates browser warnings):
+   ```bash
+   # Create certificate bundle
+   python cert_manager.py --bundle
+   
+   # Windows: Run as Administrator
+   cd certs/client_bundle && install_certificate_windows.bat
+   
+   # macOS/Linux:
+   cd certs/client_bundle && ./install_certificate_unix.sh
+   ```
+
+### SSL Features
+
+- ✅ **Automatic certificate generation** with proper Subject Alternative Names
+- ✅ **Professional HTTP to HTTPS redirects** with security warnings  
+- ✅ **Certificate trust store management** for all platforms
+- ✅ **Docker SSL termination** with nginx reverse proxy
+- ✅ **Health monitoring** and certificate status endpoints
+- ✅ **Enterprise CA support** for organizational deployments
+
+### SSL Endpoints
+
+- `/admin/ssl-help` - Complete SSL setup guide
+- `/admin/certificate-bundle` - Download certificate installer
+- `/health` - System health with SSL status
+
+### Configuration Options
+
+```bash
+# Environment Variables
+FORCE_HTTPS=true          # Force HTTPS mode (default)
+ALLOW_HTTP=false          # Allow HTTP connections  
+SSL_CERT_FILE=certs/server.crt    # Certificate path
+SSL_KEY_FILE=certs/server.key     # Private key path
+```
+
+For detailed SSL setup instructions, see [SSL_SETUP_GUIDE.md](SSL_SETUP_GUIDE.md) or visit `/admin/ssl-help` when the application is running.
+
 ---
 
 ## 📋 Prerequisites

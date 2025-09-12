@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  financial-command-center:
+    build: .
+    container_name: financial-command-center-ssl
+    ports:
+      - "443:8000"    # HTTPS
+      - "80:8080"     # HTTP redirect
+    volumes:
+      # SSL certificates
+      - ./certs:/app/certs:ro
+      # Configuration
+      - ./secure_config:/app/secure_config:ro
+      # Application data
+      - app_data:/app/data
+    environment:
+      # SSL Configuration
+      - FORCE_HTTPS=true
+      - ALLOW_HTTP=false
+      - SSL_CERT_FILE=/app/certs/server.crt
+      - SSL_KEY_FILE=/app/certs/server.key
+      - CA_CERT_FILE=/app/certs/ca.crt
+      
+      # Flask Configuration
+      - FLASK_ENV=production
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      
+      # API Keys (from .env file)
+      - XERO_CLIENT_ID=${XERO_CLIENT_ID}
+      - XERO_CLIENT_SECRET=${XERO_CLIENT_SECRET}
+      - STRIPE_API_KEY=${STRIPE_API_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - PLAID_CLIENT_ID=${PLAID_CLIENT_ID}
+      - PLAID_SECRET=${PLAID_SECRET}
+      
+      # Security Settings
+      - ENABLE_RATE_LIMITING=true
+      - MAX_REQUESTS_PER_MINUTE=100
+      - ENABLE_API_KEY_AUTH=true
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    restart: unless-stopped
+    
+    networks:
+      - financial_network
+    
+    labels:
+      - "com.financial-command-center.service=main"
+      - "com.financial-command-center.version=2.0"
+
+  # Certificate management service
+  cert-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.cert-manager
+    container_name: financial-cert-manager
+    volumes:
+      - ./certs:/app/certs
+    environment:
+      - CERT_VALIDITY_DAYS=365
+      - CERT_ORGANIZATION=Financial Command Center AI
+      - CERT_COUNTRY=US
+      - CERT_HOSTNAMES=localhost,127.0.0.1,financial-command-center,::1
+    command: ["python", "cert_manager.py", "--generate"]
+    networks:
+      - financial_network
+
+  # HTTP to HTTPS redirect service
+  http-redirect:
+    image: nginx:alpine
+    container_name: financial-http-redirect
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/redirect.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - financial-command-center
+    networks:
+      - financial_network
+    restart: unless-stopped
+
+  # Optional: Reverse proxy with SSL termination
+  reverse-proxy:
+    image: nginx:alpine
+    container_name: financial-reverse-proxy
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - financial-command-center
+    networks:
+      - financial_network
+    restart: unless-stopped
+    profiles:
+      - reverse-proxy
+
+volumes:
+  app_data:
+    driver: local
+
+networks:
+  financial_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
