@@ -1,11 +1,6 @@
-
-# Project Title
-
-A brief description of what this project does and who it's for
-
 # Financial Command Center (MCP Integrations)
 
-This repo (`Stripe Playground`) contains a **Modular Command Protocol (MCP) integration suite** that unifies:
+This repo (`Financial Command Center`) contains a **Modular Command Protocol (MCP) integration suite** that unifies:
 
 - **Stripe** → payments, customers, subscriptions, checkout  
 - **Plaid** → banking data, balances, transactions (sandbox + real)  
@@ -51,6 +46,11 @@ It enables natural-language control of real financial workflows via Claude Deskt
 
 ---
 
+## 📋 Prerequisites
+- [Xero Developer Account](https://developer.xero.com/)
+- [Stripe Account](https://stripe.com/)
+- [Plaid Account](https://my.plaid.com/sign-in)
+
 ## 🛠️ Setup
 
 ### 1) Clone Repo
@@ -72,30 +72,41 @@ source .venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
-### 4) Configure environment variables
+### 4) Configure environment variables (Windows Powershell)
 - Xero 
 ```bash
-XERO_CLIENT_ID=your_xero_client_id
-XERO_CLIENT_SECRET=your_xero_client_secret
-FLASK_SECRET_KEY=dev
+$env:XERO_CLIENT_ID=your_xero_client_id
+$env:XERO_CLIENT_SECRET=your_xero_client_secret
+$env:FLASK_SECRET_KEY=dev
 ```
 - Stripe
 ```bash
-STRIPE_API_KEY=sk_test_...
-STRIPE_DEFAULT_CURRENCY=usd
-MCP_STRIPE_PROD=false
+$env:STRIPE_API_KEY=sk_test_...
+$env:STRIPE_DEFAULT_CURRENCY=usd
+$env:MCP_STRIPE_PROD=false
 ```
 - Plaid
 ```bash
-PLAID_CLIENT_ID=your_plaid_client_id
-PLAID_SECRET=your_plaid_secret
-PLAID_ENV=sandbox
+$env:PLAID_CLIENT_ID=your_plaid_client_id
+$env:PLAID_SECRET=your_plaid_secret
+$env:PLAID_ENV=sandbox
 ```
 ### 5) Authenticate with Xero (once)
 ```bash
 python app.py
 ```
-## ▶️ Run MCP servers
+- Open the generated link `'https://localhost:8000' (example)`
+- Click on `Advanced` at the bottom left of the web page
+- Then click on `'Proceed to localhost (unsafe)'`
+- You should see a welcome text and an instruction to go to `'/login'`
+- Attach `'/login'`and open `'https://localhost:8000/login'`
+- Xero login page should appear, login and grant access to your account
+- A 'tenant_id' will be generated. Now you can close the browser
+- Open claude desktop and in the `search an tools` option, you'll be able to see the mcp server
+- You can also run each server [separately](#run-mcp-servers)
+- Now test with [Prompts](#example-prompts)
+
+## Run MCP servers
 - Windows PowerShell
 ```bash
 & "C:\Users\Hi\.local\bin\uv.EXE" run --project . mcp run xero_mcp.py
@@ -126,20 +137,6 @@ uv run --project . mcp run compliance_mcp.py
         "XERO_CLIENT_ID": "your_xero_client_id",
         "XERO_CLIENT_SECRET": "your_xero_client_secret",
         "FLASK_SECRET_KEY": "dev"
-      }
-    },
-    "stripe-integration": {
-      "command": "C:\\Users\\Hi\\.local\\bin\\uv.EXE",
-      "args": [
-        "run", "--project",
-        "C:\\Users\\Hi\\Documents\\GitHub\\Stripe Playground\\mcp-stripe-demo",
-        "mcp", "run",
-        "C:\\Users\\Hi\\Documents\\GitHub\\Stripe Playground\\mcp-stripe-demo\\stripe_mcp.py"
-      ],
-      "env": {
-        "STRIPE_API_KEY": "sk_test_...",
-        "MCP_STRIPE_PROD": "false",
-        "STRIPE_DEFAULT_CURRENCY": "usd"
       }
     },
     "plaid-integration": {
@@ -174,7 +171,7 @@ uv run --project . mcp run compliance_mcp.py
   }
 }
 ```
-## 💡 Example Prompts
+##  Example Prompts
 ### Xero: 
 - `Check my Xero authentication status with   xero_whoami.` 
 - `Run xero_org_info and show org name, tenant_id, and base currency.` 
