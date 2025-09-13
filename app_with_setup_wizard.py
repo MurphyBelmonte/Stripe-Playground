@@ -143,6 +143,18 @@ def index():
     
     integration_status = get_integration_status()
     
+    xero_buttons = ''
+    if integration_status.get('xero', {}).get('configured'):
+        xero_buttons = """
+            <a href="/api/xero/contacts" class="btn">📋 View Contacts</a>
+            <a href="/api/xero/invoices" class="btn">🧾 View Invoices</a>
+        """
+    else:
+        xero_buttons = """
+            <a href="/api/xero/contacts" class="btn">📋 View Contacts</a>
+            <a href="/api/xero/invoices" class="btn">🧾 View Invoices</a>
+        """
+
     return f"""
     <!DOCTYPE html>
     <html>
@@ -212,7 +224,7 @@ def index():
             </div>
             
             <div style="text-align: center; margin-top: 40px;">
-                {'<a href="/login" class="btn">🔗 Connect to Xero</a>' if integration_status.get('xero', {}).get('configured') else ''}
+                {xero_buttons}
                 <a href="/admin/dashboard" class="btn">📊 Admin Dashboard</a>
                 <a href="/health" class="btn">💓 Health Check</a>
                 <a href="/setup" class="btn btn-setup">⚙️ Configuration</a>
@@ -392,8 +404,8 @@ def profile():
                 {''.join([f'<div class="account"><strong>{account.name}</strong><br><small>Code: {account.code}</small></div>' for account in accounts.accounts[:5]])}
                 
                 <div style="margin-top: 30px;">
-                    <a href="/api/xero/contacts" class="btn">📋 View API Contacts</a>
-                    <a href="/api/xero/invoices" class="btn">🧾 View API Invoices</a>
+                    <a href="/api/xero/contacts" class="btn">📋 View Contacts</a>
+                    <a href="/api/xero/invoices" class="btn">🧾 View Invoices</a>
                     <a href="/admin/dashboard" class="btn">📊 Admin Dashboard</a>
                     <a href="/" class="btn">🏠 Home</a>
                 </div>
@@ -425,11 +437,7 @@ def get_xero_contacts():
         }), 400
         
     if not session.get("token"):
-        return jsonify({
-            'error': 'Xero not authenticated', 
-            'auth_url': url_for('login', _external=True),
-            'message': 'Visit the auth_url to connect Xero first'
-        }), 401
+        return redirect(url_for('login'))
     
     try:
         accounting_api = AccountingApi(api_client)
@@ -457,7 +465,61 @@ def get_xero_contacts():
             'client': request.client_info['client_name'],
             'tenant_id': session.get('tenant_id')
         })
-        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/xero/invoices', methods=['GET'])
+@require_api_key
+def get_xero_invoices():
+    """Get Xero invoices - available once Xero is configured and authed.
+    Adds sensible defaults and clear errors when not ready."""
+    if not XERO_AVAILABLE:
+        return jsonify({
+            'error': 'Xero not configured',
+            'message': 'Complete setup wizard first',
+            'setup_url': url_for('setup_wizard', _external=True)
+        }), 400
+
+    if not session.get("token"):
+        return redirect(url_for('login'))
+
+    # Filters
+    status_filter = request.args.get('status', 'DRAFT,SUBMITTED,AUTHORISED')
+    limit = min(int(request.args.get('limit', 50)), 100)
+
+    try:
+        accounting_api = AccountingApi(api_client)
+        invoices = accounting_api.get_invoices(
+            xero_tenant_id=session.get('tenant_id'),
+            statuses=status_filter.split(',')
+        )
+
+        log_transaction('xero_invoices_access', len(invoices.invoices), 'items', 'success')
+
+        invoices_data = []
+        for i, invoice in enumerate(invoices.invoices or []):
+            if i >= limit:
+                break
+            invoices_data.append({
+                'invoice_id': getattr(invoice, 'invoice_id', None),
+                'invoice_number': getattr(invoice, 'invoice_number', None),
+                'type': getattr(getattr(invoice, 'type', None), 'value', None),
+                'status': getattr(getattr(invoice, 'status', None), 'value', None),
+                'total': float(getattr(invoice, 'total', 0) or 0),
+                'currency_code': getattr(getattr(invoice, 'currency_code', None), 'value', 'USD'),
+                'date': getattr(getattr(invoice, 'date', None), 'isoformat', lambda: None)(),
+                'due_date': getattr(getattr(invoice, 'due_date', None), 'isoformat', lambda: None)(),
+                'contact_name': getattr(getattr(invoice, 'contact', None), 'name', None),
+            })
+
+        return jsonify({
+            'success': True,
+            'invoices': invoices_data,
+            'count': len(invoices_data),
+            'total_available': len(getattr(invoices, 'invoices', []) or []),
+            'filters': {'status': status_filter, 'limit': limit}
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -585,6 +647,17 @@ def admin_dashboard():
                 <p>Admin Dashboard - System Management & Monitoring</p>
             </div>
             
+            {% if not api_keys %}
+            <div class="section" style="border-left:4px solid #f39c12; background:#fff3cd;">
+                <h3 style="margin-top:0;">First‑Run Tip: Create a Demo API Key</h3>
+                <p>To call APIs from your browser or curl, create a demo key and include it in the <code>X-API-Key</code> header.</p>
+                <div class="api-key" style="background:#fff;">
+                    <div><a class="btn" href="/admin/create-demo-key">Create Demo Key</a></div>
+                    <div style="margin-top:10px; font-family:monospace; font-size:14px;">curl -k -H "X-API-Key: YOUR_KEY" https://localhost:8000/health</div>
+                </div>
+            </div>
+            {% endif %}
+
             <div class="stats">
                 <div class="stat-box">
                     <div class="stat-value">{{ total_keys }}</div>
@@ -639,7 +712,7 @@ def admin_dashboard():
                     </div>
                     {% endfor %}
                 {% else %}
-                    <p>No API keys created yet.</p>
+                    <p>No API keys created yet. Use <a href="/admin/create-demo-key">Create Demo Key</a> to generate one instantly.</p>
                 {% endif %}
             </div>
             
@@ -818,7 +891,9 @@ if __name__ == '__main__':
     
     print()
     protocol = "https" if ssl_context else "http"
-    port = 8000
+    # Allow launcher to select/override port
+    import os as _os
+    port = int(_os.getenv('FCC_PORT') or _os.getenv('PORT') or '8000')
     print("🌐 URLs:")
     print(f"  🏠 Home: {protocol}://localhost:{port}/")
     print(f"  ⚙️ Setup: {protocol}://localhost:{port}/setup")
@@ -854,3 +929,18 @@ if __name__ == '__main__':
     else:
         # HTTP mode
         app.run(host='localhost', port=port, debug=True)
+# Ensure stdout can print Unicode on Windows consoles
+try:
+    import io as _io
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+    # Fallback hard wrap
+    if getattr(sys.stdout, 'encoding', '').lower() != 'utf-8' and hasattr(sys.stdout, 'buffer'):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if getattr(sys.stderr, 'encoding', '').lower() != 'utf-8' and hasattr(sys.stderr, 'buffer'):
+        sys.stderr = _io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+except Exception:
+    pass

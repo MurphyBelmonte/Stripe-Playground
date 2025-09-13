@@ -1,0 +1,22 @@
+# Financial Command Center AI - Launcher Dependencies
+# These are additional dependencies required for the launcher executable
+
+# System tray integration
+pystray>=0.19.4
+Pillow>=9.5.0
+
+# GUI components
+tkinter-plus>=1.0.0; platform_system == "Linux"
+
+# Executable building
+pyinstaller>=5.13.0
+
+# Additional utilities
+requests>=2.31.0
+psutil>=5.9.0
+
+# SSL certificate generation
+cryptography>=42.0.0
+
+# Optional: Enhanced GUI styling
+ttkbootstrap>=1.10.1

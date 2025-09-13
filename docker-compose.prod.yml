@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  financial-command-center:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 512M
+        reservations:
+          memory: 256M
+    environment:
+      FLASK_ENV: production
+      ENABLE_RATE_LIMITING: ${ENABLE_RATE_LIMITING:-true}
+      MAX_REQUESTS_PER_MINUTE: ${MAX_REQUESTS_PER_MINUTE:-100}
+      ENABLE_API_KEY_AUTH: ${ENABLE_API_KEY_AUTH:-true}
+      # Enforce HTTPS semantics internally too (in case proxy headers are forwarded)
+      FORCE_HTTPS: "true"
+      ALLOW_HTTP: "false"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Keep volumes from base compose
+
+  reverse-proxy:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+

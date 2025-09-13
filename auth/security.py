@@ -221,33 +221,56 @@ class SecurityManager:
         }
 
 def require_api_key(f):
-    """Decorator to require API key authentication"""
+    """Decorator to require API key authentication with helpful guidance."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        from flask import request, jsonify
-        
+        from flask import request, jsonify, url_for
+
         api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
         if not api_key:
-            return jsonify({'error': 'API key required', 'code': 'AUTH_REQUIRED'}), 401
-        
+            # Provide actionable guidance to obtain a key
+            help_payload = {
+                'error': 'API key required',
+                'code': 'AUTH_REQUIRED',
+                'header': 'X-API-Key: <your_key>',
+                'create_demo_key_url': '/admin/create-demo-key',
+                'how_to_fix': [
+                    'Visit /admin/create-demo-key to generate a demo key',
+                    'Send header X-API-Key with that value',
+                ],
+                'examples': {
+                    'curl': 'curl -H "X-API-Key: YOUR_KEY" https://localhost:8000/health',
+                    'browser': 'https://localhost:8000/health?api_key=YOUR_KEY'
+                }
+            }
+            try:
+                help_payload['dashboard'] = url_for('admin_dashboard')
+            except Exception:
+                pass
+            return jsonify(help_payload), 401
+
         security = SecurityManager()
         client_info = security.validate_api_key(api_key)
-        
+
         if not client_info:
-            return jsonify({'error': 'Invalid API key', 'code': 'AUTH_INVALID'}), 401
-        
+            return jsonify({
+                'error': 'Invalid API key',
+                'code': 'AUTH_INVALID',
+                'create_demo_key_url': '/admin/create-demo-key'
+            }), 401
+
         # Check rate limits
         if not security.check_rate_limit(api_key):
             return jsonify({
-                'error': 'Rate limit exceeded', 
+                'error': 'Rate limit exceeded',
                 'code': 'RATE_LIMIT_EXCEEDED',
                 'retry_after': 3600
             }), 429
-        
+
         # Add client info to request context
         request.client_info = client_info
         request.api_key = api_key
-        
+
         return f(*args, **kwargs)
     return decorated_function
 

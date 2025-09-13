@@ -1,0 +1,35 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.benchmarks
+__dist__
+build
+dist
+
+# Git
+.git
+.gitignore
+
+# Virtualenv
+.venv
+venv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+.env
+*.local
+
+# Tests
+tests/
+run_tests.py
+run_tests_fixed.ps1
+
+# Client bundles and generated artifacts
+certs/client_bundle/
+

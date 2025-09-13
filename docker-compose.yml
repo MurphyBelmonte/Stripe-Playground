@@ -1,0 +1,88 @@
+version: '3.8'
+
+name: financial-command-center
+
+services:
+  financial-command-center:
+    build: .
+    container_name: financial-command-center
+    restart: unless-stopped
+    environment:
+      # Flask/Application
+      FLASK_ENV: production
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-change_me_in_prod}
+
+      # App server-mode flags (internal; TLS handled by reverse-proxy)
+      FORCE_HTTPS: "false"
+      ALLOW_HTTP: "true"
+
+      # Optional Integrations (can be configured via setup wizard instead)
+      XERO_CLIENT_ID: ${XERO_CLIENT_ID:-}
+      XERO_CLIENT_SECRET: ${XERO_CLIENT_SECRET:-}
+      STRIPE_API_KEY: ${STRIPE_API_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      PLAID_CLIENT_ID: ${PLAID_CLIENT_ID:-}
+      PLAID_SECRET: ${PLAID_SECRET:-}
+
+      # Security settings
+      ENABLE_RATE_LIMITING: ${ENABLE_RATE_LIMITING:-true}
+      MAX_REQUESTS_PER_MINUTE: ${MAX_REQUESTS_PER_MINUTE:-100}
+      ENABLE_API_KEY_AUTH: ${ENABLE_API_KEY_AUTH:-true}
+
+    volumes:
+      - ./secure_config:/app/secure_config
+      - ./certs:/app/certs
+      - app_data:/app/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    networks:
+      - financial_network
+
+  cert-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.cert-manager
+    container_name: financial-cert-manager
+    command: ["python", "cert_manager.py", "--generate"]
+    environment:
+      CERT_VALIDITY_DAYS: ${CERT_VALIDITY_DAYS:-365}
+      CERT_ORGANIZATION: ${CERT_ORGANIZATION:-Financial Command Center AI}
+      CERT_COUNTRY: ${CERT_COUNTRY:-US}
+      CERT_HOSTNAMES: ${CERT_HOSTNAMES:-localhost,127.0.0.1,financial-command-center}
+    volumes:
+      - ./certs:/app/certs
+    restart: "no"
+    networks:
+      - financial_network
+
+  reverse-proxy:
+    image: nginx:alpine
+    container_name: financial-reverse-proxy
+    depends_on:
+      cert-manager:
+        condition: service_completed_successfully
+      financial-command-center:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - financial_network
+    restart: unless-stopped
+
+volumes:
+  app_data:
+    driver: local
+
+networks:
+  financial_network:
+    driver: bridge

@@ -160,6 +160,7 @@ class APIValidator:
     @staticmethod
     def validate_stripe_credentials(api_key: str, publishable_key: str = None) -> Tuple[bool, str, Dict[str, Any]]:
         """Validate Stripe API credentials"""
+        stripe = None
         try:
             import stripe
             
@@ -194,11 +195,19 @@ class APIValidator:
                 'type': account.type
             }
             
-        except stripe.error.AuthenticationError:
-            return False, "Invalid API key", {}
-        except stripe.error.InvalidRequestError as e:
-            return False, f"Invalid request: {str(e)}", {}
+        except ImportError:
+            return False, "Stripe library not installed", {}
         except Exception as e:
+            # Handle Stripe-specific errors if stripe was imported successfully
+            if stripe is not None:
+                try:
+                    if hasattr(stripe, 'error'):
+                        if isinstance(e, stripe.error.AuthenticationError):
+                            return False, "Invalid API key", {}
+                        elif isinstance(e, stripe.error.InvalidRequestError):
+                            return False, f"Invalid request: {str(e)}", {}
+                except:
+                    pass
             return False, f"Connection failed: {str(e)}", {}
     
     @staticmethod 

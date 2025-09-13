@@ -5,14 +5,23 @@ from flask import Flask, session, redirect, url_for, jsonify, request, render_te
 from datetime import datetime
 import json
 
-# Your existing Xero imports
-from xero_oauth import init_oauth
-from xero_python.accounting import AccountingApi
-from xero_python.api_client import ApiClient, Configuration
-from xero_python.api_client.oauth2 import OAuth2Token
-from xero_python.exceptions import AccountingBadRequestException
-from xero_python.identity import IdentityApi
-from xero_python.api_client import serialize
+# Demo mode manager and mock data
+from demo_mode import DemoModeManager, mock_stripe_payment
+import xero_demo_data
+import plaid_demo_data
+
+# Xero imports (optional when in live mode)
+try:
+    from xero_oauth import init_oauth
+    from xero_python.accounting import AccountingApi
+    from xero_python.api_client import ApiClient, Configuration
+    from xero_python.api_client.oauth2 import OAuth2Token
+    from xero_python.exceptions import AccountingBadRequestException
+    from xero_python.identity import IdentityApi
+    from xero_python.api_client import serialize
+    XERO_SDK_AVAILABLE = True
+except Exception:
+    XERO_SDK_AVAILABLE = False
 from xero_client import save_token_and_tenant
 
 # Add our security layer
@@ -39,6 +48,9 @@ except ImportError:
 
 app = Flask(__name__)
 
+# Initialize demo mode management (adds /api/mode and /admin/mode, and banner helpers)
+demo = DemoModeManager(app)
+
 # Your existing config with enhanced security
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev_only_replace_me')
 app.config['XERO_CLIENT_ID'] = os.getenv('XERO_CLIENT_ID', 'YOUR_CLIENT_ID')     
@@ -48,42 +60,46 @@ app.config['XERO_CLIENT_SECRET'] = os.getenv('XERO_CLIENT_SECRET', 'YOUR_CLIENT_
 if SECURITY_ENABLED:
     security = SecurityManager()
 
-# Your existing Xero setup
-cid = app.config['XERO_CLIENT_ID'] = os.getenv('XERO_CLIENT_ID', '')
-csec = app.config['XERO_CLIENT_SECRET'] = os.getenv('XERO_CLIENT_SECRET', '')
-
-# Your existing validation
-if not cid or cid.startswith('YOUR_'):
-    raise RuntimeError("XERO_CLIENT_ID not set. Export env var before running.")
-if not csec or csec.startswith('YOUR_'):
-    raise RuntimeError("XERO_CLIENT_SECRET not set. Export env var before running.")
-
-# Your existing API client setup
-api_client = ApiClient(Configuration(
-    oauth2_token=OAuth2Token(
-        client_id=app.config['XERO_CLIENT_ID'],
-        client_secret=app.config['XERO_CLIENT_SECRET'],
-    )
-))
-
-# Your existing token handlers
-@api_client.oauth2_token_getter
-def _get_token_from_session():
-    return session.get('token')
-
-@api_client.oauth2_token_saver
-def _save_token_to_session(token):
-    allowed = {
-        "access_token", "refresh_token", "token_type",
-        "expires_in", "expires_at", "scope", "id_token"
-    }
-    token = {k: v for k, v in token.items() if k in allowed}
-    session['token'] = token
-    session.modified = True
-
-# Your existing OAuth setup
+# Xero setup (demo-safe)
+api_client = None
+oauth = None
+xero = None
 REDIRECT_URI = "https://localhost:8000/callback"
-oauth, xero = init_oauth(app)
+
+if not demo.is_demo:
+    cid = app.config['XERO_CLIENT_ID'] = os.getenv('XERO_CLIENT_ID', '')
+    csec = app.config['XERO_CLIENT_SECRET'] = os.getenv('XERO_CLIENT_SECRET', '')
+
+    if not cid or cid.startswith('YOUR_'):
+        raise RuntimeError("XERO_CLIENT_ID not set. Export env var before running, or enable demo mode.")
+    if not csec or csec.startswith('YOUR_'):
+        raise RuntimeError("XERO_CLIENT_SECRET not set. Export env var before running, or enable demo mode.")
+
+    if not XERO_SDK_AVAILABLE:
+        raise RuntimeError("Xero SDK not available. Install dependencies or enable demo mode.")
+
+    api_client = ApiClient(Configuration(
+        oauth2_token=OAuth2Token(
+            client_id=app.config['XERO_CLIENT_ID'],
+            client_secret=app.config['XERO_CLIENT_SECRET'],
+        )
+    ))
+
+    @api_client.oauth2_token_getter
+    def _get_token_from_session():
+        return session.get('token')
+
+    @api_client.oauth2_token_saver
+    def _save_token_to_session(token):
+        allowed = {
+            "access_token", "refresh_token", "token_type",
+            "expires_in", "expires_at", "scope", "id_token"
+        }
+        token = {k: v for k, v in token.items() if k in allowed}
+        session['token'] = token
+        session.modified = True
+
+    oauth, xero = init_oauth(app)
 
 # NEW: Health check endpoint (no auth required)
 @app.route('/health', methods=['GET'])
@@ -92,6 +108,7 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'version': '2.0.0',
+        'mode': 'demo' if 'demo' in demo.get_mode() else 'live',
         'security': 'enabled' if SECURITY_ENABLED else 'disabled',
         'integrations': {
             'xero': 'configured',
@@ -143,7 +160,8 @@ if SECURITY_ENABLED:
 # Your existing routes (preserved)
 @app.route('/')
 def index():
-    return """
+    banner = demo.banner_html()
+    return banner + """
     <html>
     <head>
         <title>Financial Command Center AI</title>
@@ -195,12 +213,30 @@ def index():
 
 @app.route('/login')
 def login():
-    """Your existing Xero login"""
+    """Xero login (disabled in demo mode)."""
+    if 'demo' in demo.get_mode():
+        banner = demo.banner_html()
+        return f"""
+        <html><body style='font-family:Segoe UI,Arial,sans-serif;'>
+        {banner}
+        <div style='max-width:720px;margin:40px auto;background:white;padding:30px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.08)'>
+            <h2>Xero Connection (Demo)</h2>
+            <p>You are in demo mode. This experience uses sample Xero data for contacts and invoices.</p>
+            <p>To connect your real Xero organisation, switch to <strong>Live</strong> mode.</p>
+            <div style='margin-top:18px;'>
+              <a href='/admin/mode' style='background:#667eea;color:white;padding:10px 14px;border-radius:6px;text-decoration:none;'>Upgrade to Real Data</a>
+              <a href='/' style='margin-left:8px;'>Back</a>
+            </div>
+        </div>
+        </body></html>
+        """
     return xero.authorize_redirect(redirect_uri=REDIRECT_URI)
 
 @app.route('/callback')
 def callback():
     """Your existing Xero callback - enhanced with logging"""
+    if demo.is_demo:
+        return "Demo mode active. OAuth callback not applicable.", 400
     try:
         token = xero.authorize_access_token()
         allowed = {
@@ -238,6 +274,22 @@ def callback():
 @app.route('/profile')
 def profile():
     """Your existing profile route - enhanced with better formatting"""
+    if demo.is_demo:
+        banner = demo.banner_html()
+        return f"""
+        <html>
+        <head><title>Xero Profile (Demo)</title></head>
+        <body style=\"font-family:Segoe UI,Arial,sans-serif;\">{banner}
+        <div style=\"max-width: 800px; margin: 40px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.08);\">
+          <h2>Xero (Demo)</h2>
+          <p>This is a demo profile view. API endpoints return sample invoices and contacts.</p>
+          <div style=\"margin-top:16px;\">
+            <a href=\"/admin/mode\" style=\"background:#667eea;color:white;padding:10px 14px;border-radius:6px;text-decoration:none;\">Upgrade to Real Data</a>
+            <a href=\"/\" style=\"margin-left:10px;\">Back</a>
+          </div>
+        </div>
+        </body></html>
+        """
     if 'token' not in session:
         return redirect(url_for('login'))
     if 'tenant_id' not in session:
@@ -292,25 +344,19 @@ def logout():
 @app.route('/api/xero/contacts', methods=['GET'])
 @require_api_key
 def get_xero_contacts():
-    """Get Xero contacts with security"""
+    """Get Xero contacts with security (demo-safe)."""
+    if demo.is_demo:
+        data = xero_demo_data.CONTACTS
+        log_transaction('xero_contacts_access_demo', len(data), 'items', 'success')
+        return jsonify({'success': True, 'mode': 'demo', 'contacts': data, 'count': len(data), 'client': request.client_info['client_name']})
+
     if not session.get("token"):
-        # For API users, provide auth URL
-        return jsonify({
-            'error': 'Xero not authenticated', 
-            'auth_url': url_for('login', _external=True),
-            'message': 'Visit the auth_url to connect Xero first'
-        }), 401
-    
+        return jsonify({'error': 'Xero not authenticated', 'auth_url': url_for('login', _external=True)}), 401
+
     try:
         accounting_api = AccountingApi(api_client)
-        contacts = accounting_api.get_contacts(
-            xero_tenant_id=session.get('tenant_id')
-        )
-        
-        # Log the access
+        contacts = accounting_api.get_contacts(xero_tenant_id=session.get('tenant_id'))
         log_transaction('xero_contacts_access', len(contacts.contacts), 'items', 'success')
-        
-        # Convert to JSON-serializable format
         contacts_data = []
         for contact in contacts.contacts:
             contacts_data.append({
@@ -321,51 +367,35 @@ def get_xero_contacts():
                 'is_supplier': contact.is_supplier,
                 'is_customer': contact.is_customer
             })
-        
-        return jsonify({
-            'success': True,
-            'contacts': contacts_data,
-            'count': len(contacts_data),
-            'client': request.client_info['client_name'],
-            'tenant_id': session.get('tenant_id')
-        })
-        
-    except AccountingBadRequestException as e:
-        return jsonify({'error': f'Xero API error: {str(e)}'}), 400
+        return jsonify({'success': True, 'mode': 'live', 'contacts': contacts_data, 'count': len(contacts_data)})
     except Exception as e:
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/api/xero/invoices', methods=['GET'])
 @require_api_key
 def get_xero_invoices():
-    """Get Xero invoices with security"""
+    """Get Xero invoices with security (demo-safe)."""
+    # Filters
+    status_filter = request.args.get('status', 'DRAFT,SUBMITTED,AUTHORISED')
+    limit = min(int(request.args.get('limit', 50)), 100)
+
+    if demo.is_demo:
+        all_inv = [inv for inv in xero_demo_data.INVOICES if inv.get('status') in status_filter.split(',')]
+        invoices_data = all_inv[:limit]
+        log_transaction('xero_invoices_access_demo', len(invoices_data), 'items', 'success')
+        return jsonify({'success': True, 'mode': 'demo', 'invoices': invoices_data, 'count': len(invoices_data), 'total_available': len(all_inv), 'filters': {'status': status_filter, 'limit': limit}})
+
     if not session.get("token"):
-        return jsonify({
-            'error': 'Xero not authenticated',
-            'auth_url': url_for('login', _external=True)
-        }), 401
-    
+        return jsonify({'error': 'Xero not authenticated', 'auth_url': url_for('login', _external=True)}), 401
+
     try:
         accounting_api = AccountingApi(api_client)
-        
-        # Get query parameters for filtering
-        status_filter = request.args.get('status', 'DRAFT,SUBMITTED,AUTHORISED')
-        limit = min(int(request.args.get('limit', 50)), 100)  # Max 100
-        
-        invoices = accounting_api.get_invoices(
-            xero_tenant_id=session.get('tenant_id'),
-            statuses=status_filter.split(',')
-        )
-        
-        # Log the access
+        invoices = accounting_api.get_invoices(xero_tenant_id=session.get('tenant_id'), statuses=status_filter.split(','))
         log_transaction('xero_invoices_access', len(invoices.invoices), 'items', 'success')
-        
-        # Convert to JSON format
         invoices_data = []
         for i, invoice in enumerate(invoices.invoices):
-            if i >= limit:  # Respect limit
+            if i >= limit:
                 break
-                
             invoices_data.append({
                 'invoice_id': invoice.invoice_id,
                 'invoice_number': invoice.invoice_number,
@@ -377,19 +407,20 @@ def get_xero_invoices():
                 'due_date': invoice.due_date.isoformat() if invoice.due_date else None,
                 'contact_name': invoice.contact.name if invoice.contact else None
             })
-        
-        return jsonify({
-            'success': True,
-            'invoices': invoices_data,
-            'count': len(invoices_data),
-            'total_available': len(invoices.invoices),
-            'client': request.client_info['client_name'],
-            'filters': {
-                'status': status_filter,
-                'limit': limit
-            }
-        })
-        
+        return jsonify({'success': True, 'mode': 'live', 'invoices': invoices_data, 'count': len(invoices_data), 'total_available': len(invoices.invoices)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# NEW: Xero report (Profit & Loss)
+@app.route('/api/xero/report/profit-and-loss', methods=['GET'])
+@require_api_key
+def xero_profit_and_loss():
+    """Return a simple Profit & Loss report (demo-safe)."""
+    try:
+        if demo.is_demo:
+            log_transaction('xero_report_pl_demo', 1, 'report', 'success')
+            return jsonify({'success': True, 'mode': 'demo', 'report': xero_demo_data.PROFIT_AND_LOSS})
+        return jsonify({'error': 'Report not implemented for live mode in this app'}), 501
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -397,19 +428,8 @@ def get_xero_invoices():
 @app.route('/api/stripe/payment', methods=['POST'])
 @require_api_key
 def create_stripe_payment():
-    """Create Stripe payment with security"""
+    """Create Stripe payment with security (demo-safe)."""
     try:
-        # Check if Stripe is configured
-        stripe_key = os.getenv('STRIPE_API_KEY')
-        if not stripe_key:
-            return jsonify({
-                'error': 'Stripe not configured',
-                'message': 'Set STRIPE_API_KEY environment variable'
-            }), 500
-        
-        import stripe
-        stripe.api_key = stripe_key
-        
         data = request.get_json()
         if not data or 'amount' not in data:
             return jsonify({'error': 'amount required'}), 400
@@ -421,27 +441,29 @@ def create_stripe_payment():
         
         # Log transaction attempt
         log_transaction('stripe_payment_create', amount_dollars, currency, 'initiated')
-        
-        # Create PaymentIntent
+
+        if demo.is_demo:
+            fake = mock_stripe_payment(amount_dollars, currency, description)
+            log_transaction('stripe_payment_create_demo', amount_dollars, currency, 'succeeded')
+            return jsonify(fake)
+
+        # Live mode
+        stripe_key = os.getenv('STRIPE_API_KEY')
+        if not stripe_key:
+            return jsonify({'error': 'Stripe not configured', 'message': 'Set STRIPE_API_KEY or enable demo mode'}), 500
+
+        import stripe
+        stripe.api_key = stripe_key
+
         payment_intent = stripe.PaymentIntent.create(
             amount=amount_cents,
             currency=currency,
             description=description,
             automatic_payment_methods={'enabled': True}
         )
-        
-        # Log success
+
         log_transaction('stripe_payment_create', amount_dollars, currency, 'created')
-        
-        return jsonify({
-            'success': True,
-            'payment_intent_id': payment_intent.id,
-            'client_secret': payment_intent.client_secret,
-            'amount': amount_dollars,
-            'currency': currency,
-            'status': payment_intent.status,
-            'client': request.client_info['client_name']
-        })
+        return jsonify({'success': True, 'payment_intent_id': payment_intent.id, 'client_secret': payment_intent.client_secret, 'amount': amount_dollars, 'currency': currency, 'status': payment_intent.status, 'client': request.client_info['client_name']})
         
     except Exception as e:
         log_transaction('stripe_payment_create', 
@@ -450,45 +472,30 @@ def create_stripe_payment():
                        'failed')
         return jsonify({'error': str(e)}), 500
 
-# NEW: Plaid integration (demo for now)
+# NEW: Plaid integration (demo/live)
 @app.route('/api/plaid/accounts', methods=['GET'])
 @require_api_key
 def get_plaid_accounts():
-    """Get Plaid accounts (demo endpoint - integrate with your plaid_mcp.py)"""
+    """Get Plaid accounts (demo-safe)."""
     try:
-        # Demo data - replace with actual Plaid integration
-        demo_accounts = [
-            {
-                'account_id': 'demo_checking_123',
-                'name': 'Business Checking',
-                'type': 'depository',
-                'subtype': 'checking',
-                'balance': 25430.75,
-                'currency': 'USD',
-                'mask': '0000'
-            },
-            {
-                'account_id': 'demo_savings_456', 
-                'name': 'Business Savings',
-                'type': 'depository',
-                'subtype': 'savings',
-                'balance': 85200.50,
-                'currency': 'USD',
-                'mask': '1111'
-            }
-        ]
-        
-        # Log access
-        log_transaction('plaid_accounts_access', len(demo_accounts), 'accounts', 'success')
-        
-        return jsonify({
-            'success': True,
-            'accounts': demo_accounts,
-            'count': len(demo_accounts),
-            'client': request.client_info['client_name'],
-            'note': 'Demo data - integrate with your plaid_mcp.py for real data'
-        })
-        
+        if demo.is_demo:
+            accounts = plaid_demo_data.ACCOUNTS
+            log_transaction('plaid_accounts_access_demo', len(accounts), 'accounts', 'success')
+            return jsonify({'success': True, 'mode': 'demo', 'accounts': accounts, 'count': len(accounts), 'client': request.client_info['client_name']})
+        return jsonify({'error': 'Plaid live mode not configured', 'message': 'Use demo mode or integrate plaid_mcp.py'}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/plaid/transactions', methods=['GET'])
+@require_api_key
+def get_plaid_transactions():
+    """Get Plaid transactions (demo-safe)."""
+    try:
+        if demo.is_demo:
+            txns = plaid_demo_data.TRANSACTIONS
+            log_transaction('plaid_transactions_access_demo', len(txns), 'transactions', 'success')
+            return jsonify({'success': True, 'mode': 'demo', 'transactions': txns, 'count': len(txns), 'client': request.client_info['client_name']})
+        return jsonify({'error': 'Plaid live mode not configured', 'message': 'Use demo mode or integrate plaid_mcp.py'}), 501
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -626,7 +633,7 @@ def admin_dashboard():
     active_keys = sum(1 for info in api_keys.values() if info.get('active', False))
     unique_clients = len(set(info['client_name'] for info in api_keys.values())) if api_keys else 0
     
-    return render_template_string(dashboard_html,
+    return demo.banner_html() + render_template_string(dashboard_html,
                                 api_keys=api_keys,
                                 total_keys=total_keys,
                                 active_keys=active_keys,
@@ -765,6 +772,9 @@ if __name__ == '__main__':
     print("📋 Available endpoints:")
     print("  GET  / - Enhanced home page")
     print("  GET  /health - System health check")
+    print("  GET  /api/mode - Get current mode")
+    print("  POST /api/mode - Set mode (demo|live)")
+    print("  GET  /admin/mode - Mode toggle UI")
     print("  GET  /login - Xero OAuth login (your existing)")
     print("  GET  /callback - Xero OAuth callback (your existing)")
     print("  GET  /profile - Xero profile (your existing)")
@@ -794,7 +804,7 @@ if __name__ == '__main__':
     
     print()
     protocol = "https" if ssl_context else "http"
-    port = 8000
+    port = int(os.getenv('FCC_PORT') or os.getenv('PORT') or '8000')
     print("🌐 URLs:")
     print(f"  🏠 Home: {protocol}://localhost:{port}/")
     print(f"  🎛️  Admin: {protocol}://localhost:{port}/admin/dashboard")
@@ -831,3 +841,17 @@ if __name__ == '__main__':
     else:
         # HTTP mode
         app.run(host='localhost', port=port, debug=True)
+# Ensure stdout can print Unicode on Windows consoles
+try:
+    import io as _io
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+    if getattr(sys.stdout, 'encoding', '').lower() != 'utf-8' and hasattr(sys.stdout, 'buffer'):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if getattr(sys.stderr, 'encoding', '').lower() != 'utf-8' and hasattr(sys.stderr, 'buffer'):
+        sys.stderr = _io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+except Exception:
+    pass

@@ -1,0 +1,18 @@
+2025-09-13 02:09:35,879 - INFO - Using app entry: app.py
+2025-09-13 02:10:03,076 - INFO - Using app entry: app.py
+2025-09-13 02:49:50,898 - INFO - 🚀 Starting Financial Command Center AI Launcher v1.0.1
+2025-09-13 03:20:01,515 - INFO - Detected prior installation. Skipping installer wizard.
+2025-09-13 03:20:01,515 - INFO - Using app entry: app.py
+2025-09-13 03:20:01,516 - ERROR - Application file not found: app.py
+2025-09-13 03:20:01,516 - WARNING - Server failed to start on resume; launching installer.
+2025-09-13 03:20:01,516 - INFO - Starting Financial Command Center AI Launcher v1.0.1
+2025-09-13 03:20:20,266 - INFO - Python 3.13 is compatible
+2025-09-13 03:20:21,269 - INFO - Checking Python version...
+2025-09-13 03:20:21,392 - INFO - Python 3.13 is compatible
+2025-09-13 03:20:21,392 - INFO - Creating virtual environment...
+2025-09-13 03:20:21,392 - INFO - Virtual environment already exists
+2025-09-13 03:20:21,393 - INFO - Installing dependencies...
+2025-09-13 03:20:21,393 - INFO - Installing dependencies...
+2025-09-13 03:20:24,639 - INFO - Dependencies installed successfully
+2025-09-13 03:20:25,641 - INFO - Using app entry: app.py
+2025-09-13 03:20:25,642 - ERROR - Application file not found: app.py
