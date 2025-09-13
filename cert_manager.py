@@ -10,6 +10,7 @@ import json
 import subprocess
 import socket
 import ssl
+import platform
 from datetime import datetime, timedelta
 from pathlib import Path
 from cryptography import x509
@@ -21,10 +22,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 class CertificateManager:
     """Manages SSL certificates for local development and production"""
     
-    def __init__(self, base_dir=None):
+    def __init__(self, base_dir=None, use_mkcert=True):
         self.base_dir = Path(base_dir) if base_dir else Path.cwd()
         self.certs_dir = self.base_dir / "certs"
         self.config_file = self.certs_dir / "cert_config.json"
+        self.use_mkcert = use_mkcert
+        self.mkcert_path = self.base_dir / "mkcert.exe" if platform.system() == "Windows" else "mkcert"
         
         # Ensure certs directory exists
         self.certs_dir.mkdir(exist_ok=True, parents=True)
@@ -39,10 +42,145 @@ class CertificateManager:
             "last_generated": None,
             "hostnames": ["localhost", "127.0.0.1", "::1"],
             "organization": "Financial Command Center AI",
-            "country": "US"
+            "country": "US",
+            "use_mkcert": use_mkcert,
+            "trust_installed": False
         }
         
         self._load_config()
+    
+    def _is_mkcert_available(self):
+        """Check if mkcert is available and working"""
+        try:
+            if self.mkcert_path.exists() if isinstance(self.mkcert_path, Path) else True:
+                result = subprocess.run(
+                    [str(self.mkcert_path), "-version"],
+                    capture_output=True, text=True, timeout=10
+                )
+                return result.returncode == 0
+        except Exception as e:
+            print(f"⚠️  mkcert check failed: {e}")
+        return False
+    
+    def install_mkcert_ca(self):
+        """Install mkcert CA to system trust store"""
+        if not self.use_mkcert or not self._is_mkcert_available():
+            return False
+        
+        try:
+            print("🔐 Installing mkcert CA to system trust store...")
+            result = subprocess.run(
+                [str(self.mkcert_path), "-install"],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if result.returncode == 0:
+                print("✅ mkcert CA installed to system trust store")
+                self.config["trust_installed"] = True
+                self._save_config()
+                return True
+            else:
+                print(f"⚠️  mkcert CA installation failed: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"⚠️  Error installing mkcert CA: {e}")
+            return False
+    
+    def generate_mkcert_certificates(self):
+        """Generate certificates using mkcert for automatic browser trust"""
+        if not self.use_mkcert or not self._is_mkcert_available():
+            return False
+        
+        try:
+            print("🔐 Generating certificates with mkcert...")
+            
+            # Install CA if not already done
+            if not self.config.get("trust_installed", False):
+                self.install_mkcert_ca()
+            
+            # Generate server certificate
+            cert_args = [str(self.mkcert_path), "-cert-file", self.config["cert_file"], 
+                        "-key-file", self.config["key_file"]] + self.config["hostnames"]
+            
+            result = subprocess.run(cert_args, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                print(f"✅ mkcert certificates generated successfully")
+                print(f"   Certificate: {self.config['cert_file']}")
+                print(f"   Private key: {self.config['key_file']}")
+                
+                # Update config
+                self.config["last_generated"] = datetime.now().isoformat()
+                self.config["use_mkcert"] = True
+                self._save_config()
+                
+                return True
+            else:
+                print(f"⚠️  mkcert certificate generation failed: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"⚠️  Error generating mkcert certificates: {e}")
+            return False
+    
+    def install_certificate_to_system_store(self):
+        """Install certificate to Windows certificate store programmatically"""
+        if platform.system() != "Windows":
+            return False
+        
+        ca_cert_path = Path(self.config["ca_cert"])
+        if not ca_cert_path.exists():
+            return False
+        
+        try:
+            print("🔐 Installing certificate to Windows certificate store...")
+            
+            # Use PowerShell to install certificate
+            powershell_cmd = f"""Import-Certificate -FilePath '{ca_cert_path.absolute()}' -CertStoreLocation 'Cert:\\LocalMachine\\Root' -ErrorAction Stop"""
+            
+            result = subprocess.run(
+                ["powershell", "-Command", powershell_cmd],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if result.returncode == 0:
+                print("✅ Certificate installed to Windows certificate store")
+                self.config["trust_installed"] = True
+                self._save_config()
+                return True
+            else:
+                print(f"⚠️  Certificate installation failed: {result.stderr}")
+                # Try fallback method
+                return self._install_certificate_fallback()
+        except Exception as e:
+            print(f"⚠️  Error installing certificate: {e}")
+            return self._install_certificate_fallback()
+    
+    def _install_certificate_fallback(self):
+        """Fallback method to install certificate using certutil"""
+        ca_cert_path = Path(self.config["ca_cert"])
+        if not ca_cert_path.exists():
+            return False
+        
+        try:
+            print("🔄 Trying alternative certificate installation method...")
+            
+            # Use certutil.exe as fallback
+            result = subprocess.run(
+                ["certutil", "-addstore", "-user", "Root", str(ca_cert_path.absolute())],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if result.returncode == 0:
+                print("✅ Certificate installed using certutil")
+                self.config["trust_installed"] = True
+                self._save_config()
+                return True
+            else:
+                print(f"⚠️  certutil installation also failed: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"⚠️  Fallback certificate installation failed: {e}")
+            return False
     
     def _load_config(self):
         """Load configuration from file if it exists"""
@@ -250,8 +388,24 @@ class CertificateManager:
         """Ensure valid certificates exist, generate if needed"""
         if not self.is_certificate_valid():
             print("🔄 Generating new SSL certificates...")
-            self.generate_server_certificate()
-            return True
+            
+            # Try mkcert first for better browser compatibility
+            if self.use_mkcert and self._is_mkcert_available():
+                if self.generate_mkcert_certificates():
+                    print("🎉 Trusted certificates generated with mkcert!")
+                    print("   Browsers should now show secure connections without warnings.")
+                    return True
+                else:
+                    print("⚠️  mkcert failed, falling back to self-signed certificates...")
+            
+            # Fallback to self-signed certificates
+            success = self.generate_server_certificate()
+            if success and platform.system() == "Windows":
+                # Try to install self-signed CA to system store
+                print("🔧 Attempting to install CA certificate to system trust store...")
+                self.install_certificate_to_system_store()
+            
+            return success
         else:
             print("✅ SSL certificates are valid")
             return False
@@ -514,7 +668,11 @@ echo "3. Try accessing https://localhost:8000 again"
             "server_key_exists": Path(self.config["key_file"]).exists(),
             "last_generated": self.config.get("last_generated"),
             "expires": self._get_cert_expiry(),
-            "hostnames": self.config["hostnames"]
+            "hostnames": self.config["hostnames"],
+            "mkcert_available": self._is_mkcert_available(),
+            "use_mkcert": self.config.get("use_mkcert", False),
+            "trust_installed": self.config.get("trust_installed", False),
+            "platform": platform.system()
         }
         
         # Test SSL connection
@@ -544,18 +702,35 @@ def main():
     parser.add_argument("--instructions", action="store_true", help="Show installation instructions")
     parser.add_argument("--bundle", action="store_true", help="Create client installation bundle")
     parser.add_argument("--health", action="store_true", help="Perform health check")
+    parser.add_argument("--mkcert", action="store_true", help="Generate certificates using mkcert (browser trusted)")
+    parser.add_argument("--install-ca", action="store_true", help="Install CA certificate to system trust store")
+    parser.add_argument("--no-mkcert", action="store_true", help="Force use of self-signed certificates instead of mkcert")
     
     args = parser.parse_args()
     
-    cert_manager = CertificateManager()
+    # Determine mkcert usage based on arguments
+    use_mkcert = not args.no_mkcert
+    cert_manager = CertificateManager(use_mkcert=use_mkcert)
     
-    if args.generate:
+    if args.mkcert:
+        if cert_manager.generate_mkcert_certificates():
+            print("🎉 Browser-trusted certificates generated successfully!")
+        else:
+            print("❌ Failed to generate mkcert certificates")
+    elif args.install_ca:
+        if cert_manager._is_mkcert_available():
+            cert_manager.install_mkcert_ca()
+        else:
+            cert_manager.install_certificate_to_system_store()
+    elif args.generate:
         cert_manager.generate_server_certificate()
     elif args.check:
         valid = cert_manager.is_certificate_valid()
         print(f"Certificate valid: {'✅ Yes' if valid else '❌ No'}")
         if not valid:
             print("Run with --generate to create new certificates")
+            if cert_manager._is_mkcert_available():
+                print("Or use --mkcert for browser-trusted certificates")
     elif args.instructions:
         print(cert_manager.install_ca_instructions())
     elif args.bundle:
@@ -565,17 +740,20 @@ def main():
         print("🔐 SSL Certificate Health Check:")
         print("=" * 40)
         for key, value in status.items():
-            icon = "✅" if (key.endswith("_exists") and value) or (key == "certificate_valid" and value) or (key == "ssl_connection" and value == "success") else "❌" if key.endswith("_exists") or key in ["certificate_valid", "ssl_connection"] else "ℹ️"
+            icon = "✅" if (key.endswith("_exists") and value) or (key == "certificate_valid" and value) or (key == "ssl_connection" and value == "success") or (key in ["mkcert_available", "trust_installed"] and value) else "❌" if key.endswith("_exists") or key in ["certificate_valid", "ssl_connection"] else "ℹ️"
             print(f"{icon} {key.replace('_', ' ').title()}: {value}")
     else:
         # Default: ensure certificates exist
         cert_manager.ensure_certificates()
         print("\n📋 Available commands:")
-        print("  --generate     Generate new certificates")
+        print("  --generate     Generate new self-signed certificates")
+        print("  --mkcert       Generate browser-trusted certificates with mkcert")
+        print("  --install-ca   Install CA certificate to system trust store")
         print("  --check        Check certificate status")
         print("  --instructions Show installation instructions")
         print("  --bundle       Create client installation bundle")
         print("  --health       Perform health check")
+        print("  --no-mkcert    Force self-signed certificates (skip mkcert)")
 
 
 if __name__ == "__main__":

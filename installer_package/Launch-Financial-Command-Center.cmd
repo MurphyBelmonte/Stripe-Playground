@@ -37,8 +37,22 @@ if not exist "%APP%" (
   if exist "app.py" set "APP=app.py"
 )
 
-REM Launch detached (minimized window if python.exe is used)
-start "" /B "%PY_EXE%" "%APP%"
+REM Check if app file exists
+if not exist "%APP%" (
+  echo Could not find application file: %APP%
+  echo Please ensure the installation is complete.
+  pause
+  popd
+  endlocal
+  exit /b 1
+)
 
+echo Starting Financial Command Center AI...
+echo Using: %APP%
+
+REM Launch detached (minimized window if python.exe is used)
+start "Financial Command Center AI" /B "%PY_EXE%" "%APP%"
+
+REM Clean exit
 popd
 endlocal

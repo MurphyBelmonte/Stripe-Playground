@@ -48,5 +48,5 @@ curl -I https://localhost:8000/health
 ## Certificate Details:
 - **CA Certificate**: C:\Users\Hi\Documents\GitHub\Stripe Playground\Financial-Command-center-AI\certs\ca.crt
 - **Server Certificate**: C:\Users\Hi\Documents\GitHub\Stripe Playground\Financial-Command-center-AI\certs\server.crt
-- **Valid Until**: 2026-09-12 14:26:57 UTC
+- **Valid Until**: 2027-12-13 07:57:20 UTC
 - **Hostnames**: localhost, 127.0.0.1, ::1

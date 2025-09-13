@@ -228,7 +228,7 @@ python app_with_setup_wizard.py
 | Configure new integration | `/admin/dashboard` | During setup/changes |
 | Generate API key for developer | `/admin/dashboard` | When building integrations |
 
-## 🤖 **AI-Powered Automation & MCP Integration**
+## **AI-Powered Automation & MCP Integration**
 
 ### 🚀 **What is MCP (Model Context Protocol)?**
 MCP allows AI assistants to securely connect to your business systems and automate financial operations in real-time.

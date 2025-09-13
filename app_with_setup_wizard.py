@@ -206,6 +206,15 @@ def index():
                 <a href="/setup" class="btn" style="background: rgba(255,255,255,0.2); border: 2px solid white;">⚙️ Reconfigure Settings</a>
             </div>
             
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.1);">
+                <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">AI-Powered Financial Operations</h3>
+                <p style="margin-bottom: 20px; opacity: 0.9;">Connect Claude Desktop to manage your finances with natural language commands</p>
+                <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+                    <a href="/claude/setup" class="btn" style="background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3); backdrop-filter: blur(10px); font-weight: 600; padding: 12px 24px;">🛠️ Setup Claude Desktop</a>
+                    <div style="background: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 20px; font-size: 0.9em; border: 1px solid rgba(255,255,255,0.2);">Try: "Show me our cash flow this month"</div>
+                </div>
+            </div>
+            
             <h3>📊 Integration Status</h3>
             <div class="status-grid">
                 <div class="status-card {'configured' if integration_status.get('stripe', {}).get('configured') else 'skipped' if integration_status.get('stripe', {}).get('skipped') else 'not-configured'}">
@@ -239,7 +248,7 @@ def index():
             </div>
             
             <div style="text-align: center; margin-top: 40px;">
-                <a href="/claude/setup" class="btn" style="background: #2563eb; font-size: 1.1em; padding: 16px 32px;">🤖 Connect to Claude Desktop</a><br><br>
+                <a href="/claude/setup" class="btn" style="background: #2563eb; font-size: 1.1em; padding: 16px 32px;">Connect to Claude Desktop</a><br><br>
                 {xero_buttons}
                 <a href="/admin/dashboard" class="btn">📊 Admin Dashboard</a>
                 <a href="/health" class="btn">💓 Health Check</a>
@@ -1174,7 +1183,7 @@ def render_health_ui(health_data):
                     <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
                     </svg>
-                    🤖 Connect to Claude Desktop
+                    Connect to Claude Desktop
                 </a>
                 <a href="/" class="btn">
                     <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
@@ -2284,6 +2293,16 @@ def admin_dashboard():
                         <p><strong>Status:</strong> {{ '✅ Configured & Active' if xero_configured else '⏭️ Skipped (Demo Mode)' if xero_skipped else '❌ Not Configured' }}</p>
                         <p><strong>Accounting Sync:</strong> {{ 'Enabled' if xero_configured else 'Demo Mode' if xero_skipped else 'Disabled' }}</p>
                     </div>
+                    
+                    <div class="integration-card" style="border-left-color: #2563eb; background: linear-gradient(135deg, rgba(37, 99, 235, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);">
+                        <h3>Claude Desktop AI</h3>
+                        <p><strong>Status:</strong> Ready for Setup</p>
+                        <p><strong>AI Operations:</strong> Natural Language Commands</p>
+                        <p><strong>Commands:</strong> "Show cash flow", "List unpaid invoices", "Find contacts"</p>
+                        <div style="margin-top: 15px;">
+                            <a href="/claude/setup" class="btn" style="background: #2563eb; font-size: 0.9em; padding: 8px 16px;">🛠️ Configure Now</a>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -2328,7 +2347,7 @@ def admin_dashboard():
             
             <div class="section">
                 <h2>🚀 Quick Actions</h2>
-                <a href="/claude/setup" class="btn" style="background: #2563eb;">🤖 Connect to Claude Desktop</a>
+                <a href="/claude/setup" class="btn" style="background: #2563eb;">Connect to Claude Desktop</a>
                 <a href="/setup" class="btn">⚙️ Configuration Wizard</a>
                 <a href="/health" class="btn">💓 Health Check</a>
                 {% if xero_configured %}
@@ -2482,7 +2501,7 @@ if __name__ == '__main__':
     print("  💳 Stripe: /api/stripe/payment")
     print("  🔧 SSL Help: /admin/ssl-help")
     print("  📦 Certificate Bundle: /admin/certificate-bundle")
-    print("  🤖 Claude Desktop: /claude/setup, /api/claude/*, /api/mcp")
+    print("Claude Desktop: /claude/setup, /api/claude/*, /api/mcp")
     
     if XERO_AVAILABLE:
         print("  🔗 Xero: /login, /callback, /profile, /api/xero/contacts, /api/xero/invoices")

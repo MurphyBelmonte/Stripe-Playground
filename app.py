@@ -24,6 +24,9 @@ except Exception:
     XERO_SDK_AVAILABLE = False
 from xero_client import save_token_and_tenant
 
+# Import enhanced session configuration
+from session_config import configure_flask_sessions
+
 # Add our security layer
 sys.path.append('.')
 try:
@@ -51,8 +54,7 @@ app = Flask(__name__)
 # Initialize demo mode management (adds /api/mode and /admin/mode, and banner helpers)
 demo = DemoModeManager(app)
 
-# Your existing config with enhanced security
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev_only_replace_me')
+# Enhanced session configuration will be set up after Xero client initialization
 app.config['XERO_CLIENT_ID'] = os.getenv('XERO_CLIENT_ID', 'YOUR_CLIENT_ID')     
 app.config['XERO_CLIENT_SECRET'] = os.getenv('XERO_CLIENT_SECRET', 'YOUR_CLIENT_SECRET')
 
@@ -64,6 +66,7 @@ if SECURITY_ENABLED:
 api_client = None
 oauth = None
 xero = None
+session_config = None  # Enhanced session configuration
 REDIRECT_URI = "https://localhost:8000/callback"
 
 if not demo.is_demo:
@@ -85,26 +88,15 @@ if not demo.is_demo:
         )
     ))
 
-    @api_client.oauth2_token_getter
-    def _get_token_from_session():
-        return session.get('token')
-
-    @api_client.oauth2_token_saver
-    def _save_token_to_session(token):
-        allowed = {
-            "access_token", "refresh_token", "token_type",
-            "expires_in", "expires_at", "scope", "id_token"
-        }
-        token = {k: v for k, v in token.items() if k in allowed}
-        session['token'] = token
-        session.modified = True
-
+    # Configure enhanced session management with OAuth token handlers
+    global session_config
+    session_config = configure_flask_sessions(app, api_client)
     oauth, xero = init_oauth(app)
 
 # NEW: Health check endpoint (no auth required)
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({
+    health_data = {
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'version': '2.0.0',
@@ -115,7 +107,13 @@ def health_check():
             'stripe': 'available', 
             'plaid': 'available'
         }
-    })
+    }
+    
+    # Add session health if available
+    if session_config:
+        health_data['session_config'] = session_config.health_check()
+    
+    return jsonify(health_data)
 
 # NEW: API key management (if security enabled)
 if SECURITY_ENABLED:

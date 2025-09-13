@@ -349,17 +349,20 @@ class ServerManager:
             # Find app working directory to place certificates there
             app_path, workdir = self._resolve_app_entry()
             if workdir:
-                self.cert_manager = CertificateManager(base_dir=workdir)
+                self.cert_manager = CertificateManager(base_dir=workdir, use_mkcert=True)
             else:
-                self.cert_manager = CertificateManager()
+                self.cert_manager = CertificateManager(use_mkcert=True)
             
             self.logger.info("🔐 Setting up SSL certificates...")
             
-            # Generate certificates if needed
-            if not self.cert_manager.is_certificate_valid():
-                self.logger.info("Generating new SSL certificates...")
-                self.cert_manager.generate_server_certificate()
-                self.logger.info("✅ SSL certificates generated successfully")
+            # Use enhanced certificate generation that prefers mkcert
+            cert_generated = self.cert_manager.ensure_certificates()
+            
+            if cert_generated:
+                if self.cert_manager.config.get("use_mkcert", False) and self.cert_manager.config.get("trust_installed", False):
+                    self.logger.info("🎉 Browser-trusted certificates ready with mkcert!")
+                else:
+                    self.logger.info("✅ SSL certificates generated successfully")
             else:
                 self.logger.info("✅ SSL certificates are already valid")
             
@@ -1086,22 +1089,30 @@ class FinancialLauncher:
             # Import cert_manager locally
             from cert_manager import CertificateManager
             
-            # Create cert manager in current directory 
-            cert_manager = CertificateManager()
+            # Create cert manager with mkcert enabled in current directory 
+            cert_manager = CertificateManager(use_mkcert=True)
             
-            self.logger.info("🔐 Generating SSL certificates...")
+            self.logger.info("🔐 Setting up SSL certificates...")
             
-            # Always generate new certificates during setup
-            cert_manager.generate_server_certificate()
-            self.logger.info("✅ SSL certificates generated successfully")
+            # Use the enhanced certificate generation that prefers mkcert
+            cert_generated = cert_manager.ensure_certificates()
             
-            # Try to install CA certificate to Windows trust store
-            self._install_ca_certificate(cert_manager)
+            if cert_generated:
+                self.logger.info("✅ SSL certificates generated successfully")
+                if cert_manager.config.get("use_mkcert", False) and cert_manager.config.get("trust_installed", False):
+                    self.logger.info("🎉 Browser-trusted certificates created with mkcert!")
+                    self.logger.info("🔒 Browsers should show secure connections without warnings")
+                else:
+                    self.logger.info("📝 Self-signed certificates created - may show browser warnings")
+                    # Try to install CA certificate to Windows trust store for self-signed certs
+                    self._install_ca_certificate(cert_manager)
+            else:
+                self.logger.info("ℹ️ SSL certificates were already valid")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to generate SSL certificates: {e}")
+            self.logger.error(f"Failed to setup SSL certificates: {e}")
             return False
     
     def _install_ca_certificate(self, cert_manager):

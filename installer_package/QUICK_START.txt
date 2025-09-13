@@ -1,10 +1,19 @@
 Financial Command Center AI - Quick Start
 
+NEW: CLAUDE AI INTEGRATION AVAILABLE!
+
 1. LAUNCH: Double-click Financial-Command-Center-Launcher.exe
 2. SETUP: Follow the welcome screen instructions
 3. AUTOMATIC: Python environment and dependencies install automatically
 4. BROWSER: Web interface opens automatically
-5. ACCESS: System tray icon provides ongoing access
+5. ENABLE AI: Visit /claude/setup to configure Claude Desktop integration
+6. ACCESS: System tray icon provides ongoing access
+
+AI COMMANDS (after Claude setup):
+- "Show me our cash flow this month"
+- "List all unpaid invoices over $1000"
+- "Find contact details for [Customer Name]"
+- "Check system health and integrations"
 
 System Requirements:
 - Windows 10/11, macOS 10.14+, or Ubuntu 18.04+

@@ -1,6 +1,16 @@
-﻿# Financial Command Center AI
+# Financial Command Center AI
 
-Unified financial operations platform with one‑click launcher, HTTPS by default, and a setup wizard. This update makes installation reliable on Windows: dependencies install into a user‑writable venv, the launcher auto‑detects the app files, and the server comes up on an available port with SSL certificates generated automatically.
+## **NEW: Claude Desktop AI Integration**
+
+Unified financial operations platform with one‑click launcher, HTTPS by default, setup wizard, and **Claude Desktop AI integration** for natural language financial operations!
+
+**✨ AI Features:**
+- Natural language commands: "Show cash flow", "List unpaid invoices", "Find contacts"
+- Intelligent financial analysis and reporting
+- Voice-activated operations through Claude Desktop
+- System health monitoring via AI commands
+
+This update makes installation reliable on Windows: dependencies install into a user‑writable venv, the launcher auto‑detects the app files, and the server comes up on an available port with SSL certificates generated automatically.
 
 ---
 
@@ -53,6 +63,7 @@ Outputs:
 ## Key Endpoints
 
 - Home/setup: `https://localhost:<port>/` and `/setup`
+- **Claude AI Setup**: `https://localhost:<port>/claude/setup`
 - Health: `https://localhost:<port>/health`
 - Admin: `https://localhost:<port>/admin/dashboard`
 - SSL help: `https://localhost:<port>/admin/ssl-help`
