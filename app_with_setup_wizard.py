@@ -73,6 +73,16 @@ if CORS is not None:
 if SECURITY_ENABLED:
     security = SecurityManager()
 
+# Import and setup Claude Desktop integration
+try:
+    from claude_integration import setup_claude_routes
+    claude_setup_result = setup_claude_routes(app, logger)
+    print("✅ Claude Desktop integration loaded")
+except ImportError as e:
+    print(f"⚠️ Claude integration not available: {e}")
+except Exception as e:
+    print(f"⚠️ Claude integration setup failed: {e}")
+
 def get_credentials_or_redirect():
     """Get credentials from setup wizard or redirect to setup if not configured"""
     credentials = get_configured_credentials()
@@ -229,6 +239,7 @@ def index():
             </div>
             
             <div style="text-align: center; margin-top: 40px;">
+                <a href="/claude/setup" class="btn" style="background: #2563eb; font-size: 1.1em; padding: 16px 32px;">🤖 Connect to Claude Desktop</a><br><br>
                 {xero_buttons}
                 <a href="/admin/dashboard" class="btn">📊 Admin Dashboard</a>
                 <a href="/health" class="btn">💓 Health Check</a>
@@ -1159,6 +1170,12 @@ def render_health_ui(health_data):
             </div>
             
             <div class="nav-buttons">
+                <a href="/claude/setup" class="btn btn-primary">
+                    <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
+                    </svg>
+                    🤖 Connect to Claude Desktop
+                </a>
                 <a href="/" class="btn">
                     <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/>
@@ -2311,6 +2328,7 @@ def admin_dashboard():
             
             <div class="section">
                 <h2>🚀 Quick Actions</h2>
+                <a href="/claude/setup" class="btn" style="background: #2563eb;">🤖 Connect to Claude Desktop</a>
                 <a href="/setup" class="btn">⚙️ Configuration Wizard</a>
                 <a href="/health" class="btn">💓 Health Check</a>
                 {% if xero_configured %}
@@ -2399,6 +2417,11 @@ curl -H "X-API-Key: {demo_key}" https://localhost:8000/health
     </html>
     """
 
+# Claude Desktop Integration Routes - Now handled by claude_integration.py module
+# (Routes removed to prevent duplication)
+
+# Duplicate Claude routes removed - now handled by claude_integration.py
+
 if __name__ == '__main__':
     print("🚀 Starting Financial Command Center with Setup Wizard...")
     print("=" * 60)
@@ -2459,6 +2482,7 @@ if __name__ == '__main__':
     print("  💳 Stripe: /api/stripe/payment")
     print("  🔧 SSL Help: /admin/ssl-help")
     print("  📦 Certificate Bundle: /admin/certificate-bundle")
+    print("  🤖 Claude Desktop: /claude/setup, /api/claude/*, /api/mcp")
     
     if XERO_AVAILABLE:
         print("  🔗 Xero: /login, /callback, /profile, /api/xero/contacts, /api/xero/invoices")
