@@ -79,7 +79,38 @@
 
 > **🚨 Important**: You need active Stripe and/or Xero accounts to see real business value. Demo mode available for testing.
 
-### **Step 1: Quick Install** (≈ 2 minutes)
+### 💾 **Option 1: One-Click Windows Installer** (≈ 1 minute) - **RECOMMENDED**
+
+**Best for**: Business users who want instant setup without technical complexity
+
+1. **Download** the installer from `installer_package/Financial-Command-Center-Launcher.exe`
+2. **Double-click** to run - no installation required!
+3. **Automatic Setup**:
+   - Creates Python virtual environment
+   - Installs all dependencies automatically
+   - Generates SSL certificates
+   - Launches web browser to `https://localhost:8000`
+   - **Creates desktop shortcut** for easy access
+   - **Adds system tray icon** for quick control
+
+**What you get:**
+- ✅ **Desktop shortcut** - Click to launch anytime
+- ✅ **System tray integration** - Always accessible from taskbar
+- ✅ **Automatic updates** - Built-in update checking
+- ✅ **Error recovery** - Intelligent troubleshooting
+- ✅ **Clean uninstall** - Right-click tray icon to exit
+
+**Business Benefits:**
+- **Zero technical setup** - Perfect for accounting teams
+- **Professional deployment** - Ready for client environments
+- **Always accessible** - System tray integration
+- **Reliable operation** - Automatic dependency management
+
+---
+
+### 💻 **Option 2: Manual Install** (≈ 2 minutes)
+
+**Best for**: Developers, IT teams, custom deployments
 
 ```bash
 # Clone and setup
@@ -259,6 +290,46 @@ MCP allows AI assistants to securely connect to your business systems and automa
 - ✅ Automated customer payment follow-ups
 - ✅ Integration with other business tools via API
 
+---
+
+### 🏢 **Enterprise Deployment with Windows Installer**
+
+#### **For Accounting Firms & Multi-User Businesses**
+
+**Deployment Strategy:**
+1. **IT Admin Setup** (10 minutes):
+   - Download `Financial-Command-Center-Launcher.exe`
+   - Test on admin machine first
+   - Configure company Stripe/Xero credentials
+   - Document server URL for team access
+
+2. **Team Rollout** (5 minutes per user):
+   - Send installer to each team member
+   - Users run installer on their machines
+   - Desktop shortcuts created automatically
+   - System tray access for daily use
+
+3. **Centralized vs. Distributed**:
+   - **Option A**: One central server, team accesses via browser
+   - **Option B**: Each user runs own instance with shared credentials
+   - **Recommended**: Central server for data consistency
+
+**Business Network Considerations:**
+- **Firewall**: Ensure access to pypi.org for dependency installation
+- **Antivirus**: Whitelist Financial-Command-Center-Launcher.exe
+- **Group Policy**: Allow desktop shortcut creation
+- **SSL Certificates**: Consider using company CA for trust
+
+**Team Training:**
+- **5-minute demo**: Show desktop shortcut → browser opens → ready to use
+- **Daily workflow**: System tray icon → "Open Dashboard" → check financials
+- **Troubleshooting**: Point to system tray right-click menu
+
+**Maintenance:**
+- **Updates**: Built into installer - automatically checks for new versions
+- **Monitoring**: Each user can check `/health` dashboard
+- **Support**: Logs automatically generated in user folders
+
 ## 🎢 **Real Business Scenarios**
 
 ### 🚪 **Scenario 1: E-commerce Store Owner**
@@ -404,6 +475,34 @@ If you're building custom integrations or connecting other business tools:
 - The setup wizard guides you through everything
 - Most connections work in under 5 minutes
 - Demo mode available if you want to explore first
+
+---
+
+### 💾 **Windows Installer Troubleshooting**
+
+#### **"Installer won't start or shows security warning"**
+1. **Right-click** installer → **"Run as administrator"**
+2. **Windows Defender**: Click "More info" → "Run anyway"
+3. **Antivirus software**: Add exception for Financial-Command-Center-Launcher.exe
+4. **Corporate networks**: Contact IT to whitelist the application
+
+#### **"Python installation failed"**
+1. **Check internet connection** - installer downloads Python packages
+2. **Firewall settings** - ensure access to pypi.org
+3. **Manual fix**: Install Python 3.8+ from python.org first
+4. **Logs location**: `%LOCALAPPDATA%\Financial Command Center\Logs\launcher.log`
+
+#### **"Desktop shortcut not created"**
+1. **Check desktop permissions** - installer needs write access
+2. **Manual creation**: Right-click installer → "Send to" → "Desktop (create shortcut)"
+3. **Business networks**: IT policies may block shortcut creation
+
+#### **"System tray icon missing"**
+1. **Windows notification area**: Click "^" to expand hidden icons
+2. **Notification settings**: Ensure "Financial Command Center" is enabled
+3. **Restart application**: Exit and relaunch installer
+
+**📞 Need Help?** Check `launcher.log` file in installation folder for detailed error information.
 
 ## 🏗️ Architecture
 
